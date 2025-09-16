@@ -2,7 +2,7 @@ from typing import Optional
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app import file_storage
+from app.utils import file_storage
 from . import models, schemas
 
 
@@ -51,14 +51,30 @@ def update_order_status(
 
 
 def get_settings(db: Session):
-    return db.query(models.Setting).first()
+    settings = db.query(models.Setting).first()
+    if not settings:
+        # Создаем настройки по умолчанию
+        settings = models.Setting(
+            discount_type="percent",
+            discount_value=0,
+            payment_instructions="Оплатите заказ по реквизитам...",
+        )
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
 
 
 def update_settings(db: Session, settings: schemas.SettingsUpdate):
     db_settings = db.query(models.Setting).first()
     if db_settings:
-        for key, value in settings.dict().items():
+        for key, value in settings.model_dump().items():
             setattr(db_settings, key, value)
-        db.commit()
-        db.refresh(db_settings)
+    else:
+        # Создаем новые настройки если их нет
+        db_settings = models.Setting(**settings.model_dump())
+        db.add(db_settings)
+
+    db.commit()
+    db.refresh(db_settings)
     return db_settings

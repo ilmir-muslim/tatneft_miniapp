@@ -52,7 +52,20 @@ class Settings(SettingsBase):
         from_attributes = True
 
 
-class FuelPricesResponse(BaseModel):
-    success: bool
-    prices: Optional[Dict[str, float]] = None
-    error: Optional[str] = None
+class FuelSchema(BaseModel):
+    fuel_type_id: int
+    name: str
+    price: float
+    discount_price: Optional[float] = None
+    currency_code: str
+    updated: Optional[float] = None
+    color: Optional[str] = None
+    filter_group: Optional[str] = None
+
+
+class AzsResponse(BaseModel):
+    azs_number: int
+    address: str
+    region: Optional[str] = None
+    fuel: list[FuelSchema]
+    actualization_date: Optional[float] = None

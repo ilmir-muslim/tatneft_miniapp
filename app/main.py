@@ -1,17 +1,29 @@
 from typing import Optional
 from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import requests
 from sqlalchemy.orm import Session
-from . import crud, models, schemas
-from .price_parser import PriceParser
-from .database import SessionLocal, engine
 
-models.Base.metadata.create_all(bind=engine)
+from app.utils.price_parser import PriceParser
+from . import crud, schemas
+
+from .database import SessionLocal
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 price_parser = PriceParser()
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 
 def get_db():
     db = SessionLocal()
@@ -19,7 +31,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
 
 @app.get("/")
 async def root():
@@ -84,14 +95,17 @@ def update_settings(settings: schemas.SettingsUpdate, db: Session = Depends(get_
     return crud.update_settings(db, settings)
 
 
-@app.get("/azs/{azs_number}/prices", response_model=schemas.FuelPricesResponse)
-def get_azs_prices(azs_number: int, db: Session = Depends(get_db)):
-    """
-    Получение актуальных цен на топливо для указанной АЗС
-    """
-    prices = price_parser.get_prices(db, azs_number)
+@app.get("/azs/{azs_number}", response_model=schemas.AzsResponse)
+def get_azs_data(azs_number: int, db: Session = Depends(get_db)):
+    try:
+        settings = crud.get_settings(db)
+        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings)
 
-    if "error" in prices:
-        return schemas.FuelPricesResponse(success=False, error=prices["error"])
+        if "error" in azs_data:
+            print(f"AZS {azs_number} error: {azs_data['error']}")  # Логирование
+            raise HTTPException(status_code=404, detail=azs_data["error"])
 
-    return schemas.FuelPricesResponse(success=True, prices=prices)
+        return azs_data
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")  # Логирование неожиданных ошибок
+        raise HTTPException(status_code=500, detail="Internal server error")

@@ -1,18 +1,23 @@
+version: '3.8'
+
 services:
-  mysql:
+  mysql_tatneft:
     image: mysql:8.0
-    container_name: tatneft_mysql
-    restart: unless-stopped
+    container_name: mysql_tatneft  
+    ports:
+      - "3308:3306" 
     environment:
       MYSQL_DATABASE: tatneft_db
       MYSQL_USER: tatneft_user
       MYSQL_PASSWORD: tatneft_pass
-    ports:
-      - "3308:3306"
+      MYSQL_ROOT_PASSWORD: tatneft_pass  
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
-    command: --default-authentication-plugin=mysql_native_password
+      - mysql_tatneft_data:/var/lib/mysql  
+    networks:
+      - mysql_tatneft_network
 
 volumes:
-  mysql_data:
+  mysql_tatneft_data: 
+
+networks:
+  mysql_tatneft_network: 

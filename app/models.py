@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Enum, JSON
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
-from database import Base
+from .database import Base
 
 
 class OrderStatus(PyEnum):

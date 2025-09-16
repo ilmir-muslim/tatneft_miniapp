@@ -111,6 +111,7 @@
 
 <script>
 import { onMounted, ref, computed } from 'vue'
+import api from './services/api'; // Импорт API сервиса
 
 export default {
   name: 'App',
@@ -150,49 +151,61 @@ export default {
     }
 
     const validateStation = async () => {
-      isLoading.value = true
+      isLoading.value = true;
       try {
-        // Здесь будет реальный API запрос
-        const mockResponse = {
-          fuels: [
-            { id: 1, name: 'АИ-92', price: 45.30 },
-            { id: 2, name: 'АИ-95', price: 48.90 },
-            { id: 3, name: 'ДТ', price: 47.50 }
-          ],
-          discount: { type: 'percent', value: 5 } // Пример скидки 5%
+        // Сначала получаем данные об АЗС
+        const azsResponse = await api.getFuelPrices(stationNumber.value);
+        console.log('AZS Response:', azsResponse.data); // Для отладки
+
+        if (azsResponse.data.fuel && azsResponse.data.fuel.length > 0) {
+          // Преобразуем данные в нужный формат
+          fuels.value = azsResponse.data.fuel.map((item) => ({
+            id: item.fuel_type_id,
+            name: item.name,
+            price: item.price, // оригинальная цена
+            discount_price: item.discount_price, // цена со скидкой
+            color: item.color,
+            filterGroup: item.filter_group
+          }));
+
+          // Затем получаем настройки
+          const settingsResponse = await api.getSettings();
+          discount.value = {
+            type: settingsResponse.data.discount_type,
+            value: settingsResponse.data.discount_value
+          };
+
+          selectedFuel.value = fuels.value[0];
+          currentScreen.value = 'fuel';
+        } else {
+          alert('АЗС с таким номером не найдена');
         }
-
-        fuels.value = mockResponse.fuels
-        discount.value = mockResponse.discount
-        selectedFuel.value = fuels.value[0]
-        currentScreen.value = 'fuel'
       } catch (error) {
-        alert('Ошибка загрузки данных АЗС')
+        alert('Ошибка загрузки данных АЗС');
+        console.error('Error loading AZS data:', error);
       } finally {
-        isLoading.value = false
+        isLoading.value = false;
       }
-    }
-
+    };
+    
     const calculateTotal = () => {
+      console.log('Selected fuel:', selectedFuel.value)
+      console.log('Amount:', amount.value)
+      console.log('Total:', total.value)
       if (!selectedFuel.value || !amount.value) {
         total.value = 0
         return
       }
 
-      let finalPrice = selectedFuel.value.price
-
-      // Применение скидки
-      if (discount.value) {
-        if (discount.value.type === 'percent') {
-          finalPrice = finalPrice * (1 - discount.value.value / 100)
-        } else if (discount.value.type === 'fixed') {
-          finalPrice = Math.max(0, finalPrice - discount.value.value)
-        }
-      }
+      // Используем discount_price если доступен, иначе price
+      const finalPrice = selectedFuel.value.discount_price !== null && selectedFuel.value.discount_price !== undefined
+        ? selectedFuel.value.discount_price
+        : selectedFuel.value.price
 
       if (isVolume.value) {
         total.value = (finalPrice * amount.value).toFixed(2)
       } else {
+        // Если оплата по сумме, вычисляем объем
         total.value = amount.value
       }
     }
@@ -202,24 +215,25 @@ export default {
         alert('Заполните все поля')
         return
       }
+
+      // Передаем правильные данные
+      const finalPrice = selectedFuel.value.discount_price !== null && selectedFuel.value.discount_price !== undefined
+        ? selectedFuel.value.discount_price
+        : selectedFuel.value.price
+
+      console.log('Final price:', finalPrice) // Для отладки
       loadPaymentInstructions()
       currentScreen.value = 'payment'
     }
 
     const loadPaymentInstructions = async () => {
       try {
-        // Здесь будет API запрос
-        paymentInstructions.value = `
-      <p>Для оплаты переведите <strong>${total.value} ₽</strong> на:</p>
-      <p>СБП: +7 (XXX) XXX-XX-XX</p>
-      <p>Карта: XXXX XXXX XXXX XXXX</p>
-      <p>В комментарии укажите: АЗС-${stationNumber.value}, Колонка-${columnNumber.value}</p>
-      <p>Скидка: ${discount.value ? discount.value.value + (discount.value.type === 'percent' ? '%' : '₽') : '0%'}</p>
-    `
+        const response = await api.getSettings();
+        paymentInstructions.value = response.data.payment_instructions;
       } catch (error) {
-        paymentInstructions.value = 'Не удалось загрузить инструкцию. Попробуйте позже.'
+        paymentInstructions.value = 'Не удалось загрузить инструкцию. Попробуйте позже.';
       }
-    }
+    };
 
     const handleReceiptUpload = (event) => {
       const file = event.target.files[0]
@@ -230,21 +244,55 @@ export default {
       }
     }
 
+    const checkOrderStatus = async () => {
+      const checkStatus = async () => {
+        try {
+          const response = await api.getOrderStatus(orderId.value);
+          const status = response.data.status;
+
+          if (status !== 'ожидание') {
+            orderStatus.value = status === 'принято' ? 'approved' : 'rejected';
+            rejectionReason.value = response.data.rejection_reason;
+            currentScreen.value = 'result';
+          } else {
+            // Если статус еще "ожидание", проверяем снова через 5 секунд
+            setTimeout(checkStatus, 5000);
+          }
+        } catch (error) {
+          console.error('Ошибка проверки статуса:', error);
+          setTimeout(checkStatus, 5000);
+        }
+      };
+
+      checkStatus();
+    };
+
+
     const submitPayment = async () => {
       try {
-        // Здесь будет API запрос для создания заказа
-        currentScreen.value = 'waiting'
+        const formData = {
+          user_id: window.Telegram.WebApp.initDataUnsafe.user?.id || 1, // ID из Telegram
+          azs_number: parseInt(stationNumber.value),
+          column_number: parseInt(columnNumber.value),
+          fuel_type: selectedFuel.value.name,
+          volume: isVolume.value ? parseFloat(amount.value) : null,
+          amount: isVolume.value ? null : parseFloat(amount.value),
+        };
 
-        // Заглушка - в реальности будет WebSocket или polling
-        setTimeout(() => {
-          orderStatus.value = 'approved' // или 'rejected'
-          rejectionReason.value = 'Нечитаемый чек'
-          currentScreen.value = 'result'
-        }, 3000)
+        if (receiptImage.value) {
+          formData.cheque_image = receiptImage.value;
+        }
+
+        const response = await api.createOrder(formData);
+        orderId.value = response.data.id;
+        currentScreen.value = 'waiting';
+
+        // Запускаем опрос статуса заказа
+        checkOrderStatus();
       } catch (error) {
-        alert('Ошибка отправки чека')
+        alert('Ошибка отправки чека');
       }
-    }
+    };
 
     const resetApp = () => {
       currentScreen.value = 'station'

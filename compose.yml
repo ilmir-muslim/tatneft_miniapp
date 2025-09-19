@@ -1,23 +1,77 @@
-version: '3.8'
-
 services:
   mysql_tatneft:
     image: mysql:8.0
-    container_name: mysql_tatneft  
+    container_name: mysql_tatneft
     ports:
-      - "3308:3306" 
+      - "3308:3306"
     environment:
       MYSQL_DATABASE: tatneft_db
       MYSQL_USER: tatneft_user
       MYSQL_PASSWORD: tatneft_pass
-      MYSQL_ROOT_PASSWORD: tatneft_pass  
+      MYSQL_ROOT_PASSWORD: tatneft_pass
     volumes:
-      - mysql_tatneft_data:/var/lib/mysql  
+      - mysql_tatneft_data:/var/lib/mysql
     networks:
-      - mysql_tatneft_network
+      - tatneft_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: tatneft_backend
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: mysql+pymysql://tatneft_user:tatneft_pass@mysql_tatneft:3306/tatneft_db
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-your-secret-key-here}
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      mysql_tatneft:
+        condition: service_healthy
+    networks:
+      - tatneft_network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tatneft_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8001
+    depends_on:
+      - backend
+    networks:
+      - tatneft_network
+    restart: unless-stopped
+
+  frontend-admin:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    container_name: tatneft_admin
+    ports:
+      - "3001:3001"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8001
+      VITE_WS_URL: ws://localhost:8001/admin/ws
+    depends_on:
+      - backend
+    networks:
+      - tatneft_network
+    restart: unless-stopped
 
 volumes:
-  mysql_tatneft_data: 
+  mysql_tatneft_data:
 
 networks:
-  mysql_tatneft_network: 
+  tatneft_network:
+    driver: bridge

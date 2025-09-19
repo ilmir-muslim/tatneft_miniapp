@@ -1,5 +1,7 @@
+import os
 from typing import Optional
 from fastapi import UploadFile
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.utils import file_storage
@@ -21,14 +23,29 @@ async def create_order(
     cheque_image: Optional[UploadFile] = None,
 ):
     cheque_image_path = None
-    if cheque_image:
-        cheque_image_path = await file_storage.save_uploaded_file(cheque_image)
+    cheque_image_url = None
 
+    if cheque_image:
+        try:
+            # Сохраняем файл и получаем путь
+            cheque_image_path = await file_storage.save_uploaded_file(cheque_image)
+            cheque_image_url = f"/uploads/{os.path.basename(cheque_image_path)}"
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Ошибка при сохранении файла: {str(e)}"
+            )
+
+    # Создаем объект заказа
     db_order = models.Order(
-        **order.model_dump(exclude={"cheque_image"}),
         user_id=user_id,
+        azs_number=order.azs_number,
+        column_number=order.column_number,
+        fuel_type=order.fuel_type,
+        volume=order.volume,
+        amount=order.amount,
         status=models.OrderStatus.PENDING,
-        cheque_image_path=cheque_image_path
+        cheque_image_path=cheque_image_path,
+        cheque_image_url=cheque_image_url,
     )
 
     db.add(db_order)

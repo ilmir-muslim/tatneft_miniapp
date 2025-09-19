@@ -20,13 +20,12 @@ export default {
     createOrder(orderData) {
         const formData = new FormData();
         Object.keys(orderData).forEach(key => {
-            if (orderData[key] !== undefined) {
+            if (orderData[key] !== undefined && orderData[key] !== null) {
                 formData.append(key, orderData[key]);
             }
         });
-        return apiClient.post('/orders/', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-        });
+
+        return apiClient.post('/orders/', formData);
     },
 
     // Получить статус заказа

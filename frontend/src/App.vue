@@ -23,8 +23,8 @@
         <div class="input-group">
           <label>Вид топлива:</label>
           <select v-model="selectedFuel" @change="calculateTotal" class="input-field">
-            <option v-for="fuel in fuels" :key="fuel.id" :value="fuel">
-              {{ fuel.name }} - {{ fuel.price }} ₽/л
+            <option v-for="fuel in fuels" :key="fuel.fuel_type_id" :value="fuel">
+              {{ fuel.name }} - {{ fuel.discount_price || fuel.price }} ₽/л
             </option>
           </select>
         </div>
@@ -66,15 +66,16 @@
       <!-- Экран 3: Инструкция по оплате -->
       <div v-if="currentScreen === 'payment'" class="card">
         <h2>Инструкция по оплате</h2>
-        <div class="payment-instructions" v-html="paymentInstructions"></div>
+        <div class="payment-instructions" v-html="formattedInstructions"></div>
 
         <div class="input-group">
           <label>Загрузите скриншот чека:</label>
-          <input type="file" accept="image/*" @change="handleReceiptUpload" class="input-field">
+          <input type="file" accept="image/*,application/pdf" @change="handleReceiptUpload" class="input-field">
+          <img v-if="receiptPreview" :src="receiptPreview" alt="Предпросмотр чека" class="receipt-preview">
         </div>
 
         <button class="btn primary" @click="submitPayment" :disabled="!receiptImage">
-          Чек отправлен на проверку
+          Отправить чек на проверку
         </button>
         <button class="btn secondary" @click="currentScreen = 'fuel'">
           Назад
@@ -86,16 +87,20 @@
         <h2>Ожидание проверки</h2>
         <div class="loading-spinner"></div>
         <p>Ожидайте подтверждения оплаты администратором</p>
+        <p>Номер вашей заявки: #{{ orderId }}</p>
       </div>
 
       <!-- Экран 5: Результат проверки -->
       <div v-if="currentScreen === 'result'" class="card">
         <h2>Результат проверки</h2>
-        <div v-if="orderStatus === 'approved'">
+        <div v-if="orderStatus === 'принято'" class="result-content">
+          <div class="success-icon">✓</div>
           <p class="success-message">Оплата принята! Можете заправляться. Хорошей дороги!</p>
         </div>
-        <div v-else>
-          <p class="error-message">В оплате отказано. Причина: {{ rejectionReason }}</p>
+        <div v-else class="result-content">
+          <div class="error-icon">✗</div>
+          <p class="error-message">В оплате отказано.</p>
+          <p v-if="rejectionReason" class="rejection-reason">Причина: {{ rejectionReason }}</p>
         </div>
         <button class="btn primary" @click="resetApp">
           Создать новый заказ
@@ -104,18 +109,46 @@
     </main>
 
     <footer class="footer">
-      <p>АЗС «Татнефть»</p>
+      <p>АЗС «Татнефть» © {{ new Date().getFullYear() }}</p>
     </footer>
+
+    <!-- Уведомление -->
+    <div v-if="showNotification" class="notification" :class="notificationType">
+      {{ notificationMessage }}
+    </div>
   </div>
 </template>
 
 <script>
-import { onMounted, ref, computed } from 'vue'
-import api from './services/api'; // Импорт API сервиса
+import { ref, computed, onMounted, watch } from 'vue'
+import api from './services/api'
 
 export default {
   name: 'App',
   setup() {
+    // Инициализация Telegram WebApp
+    const initTelegramApp = () => {
+      if (window.Telegram && window.Telegram.WebApp) {
+        const tg = window.Telegram.WebApp
+        tg.expand()
+        tg.enableClosingConfirmation()
+
+        // Установка цветовой схемы из Telegram
+        if (tg.themeParams) {
+          document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff')
+          document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#222222')
+          document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#40a7e3')
+          document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff')
+          document.documentElement.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#40a7e3')
+          document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#f0f0f0')
+        }
+
+        return tg
+      }
+      return null
+    }
+
+    const tgApp = ref(initTelegramApp())
     const theme = ref('light')
     const currentScreen = ref('station')
     const stationNumber = ref('')
@@ -127,160 +160,171 @@ export default {
     const total = ref(0)
     const paymentInstructions = ref('')
     const receiptImage = ref(null)
+    const receiptPreview = ref(null)
     const orderStatus = ref('')
     const rejectionReason = ref('')
     const orderId = ref(null)
-    const discount = ref(null)
-    const isLoading = ref(false)
+    const showNotification = ref(false)
+    const notificationMessage = ref('')
+    const notificationType = ref('info')
+
+    // Вычисляемое свойство для форматирования инструкций
+    const formattedInstructions = computed(() => {
+      return paymentInstructions.value.replace(/\n/g, '<br>')
+    })
 
     // Загрузка данных при инициализации
     onMounted(() => {
-      initTelegramApp()
       loadPaymentInstructions()
+
+      // Следим за изменением темы в Telegram
+      if (tgApp.value) {
+        tgApp.value.onEvent('themeChanged', () => {
+          theme.value = tgApp.value.colorScheme
+        })
+        theme.value = tgApp.value.colorScheme
+      }
     })
 
-    const initTelegramApp = () => {
-      if (window.Telegram && window.Telegram.WebApp) {
-        const tg = window.Telegram.WebApp
-        tg.expand()
-        theme.value = tg.colorScheme
-        tg.onEvent('themeChanged', () => {
-          theme.value = tg.colorScheme
-        })
-      }
+    const showNotify = (message, type = 'info') => {
+      notificationMessage.value = message
+      notificationType.value = type
+      showNotification.value = true
+
+      setTimeout(() => {
+        showNotification.value = false
+      }, 3000)
     }
 
     const validateStation = async () => {
-      isLoading.value = true;
+      if (!stationNumber.value) {
+        showNotify('Введите номер АЗС', 'error')
+        return
+      }
+
       try {
-        // Сначала получаем данные об АЗС
-        const azsResponse = await api.getFuelPrices(stationNumber.value);
-        console.log('AZS Response:', azsResponse.data); // Для отладки
+        const azsResponse = await api.getFuelPrices(stationNumber.value)
 
-        if (azsResponse.data.fuel && azsResponse.data.fuel.length > 0) {
-          // Преобразуем данные в нужный формат
-          fuels.value = azsResponse.data.fuel.map((item) => ({
-            id: item.fuel_type_id,
-            name: item.name,
-            price: item.price, // оригинальная цена
-            discount_price: item.discount_price, // цена со скидкой
-            color: item.color,
-            filterGroup: item.filter_group
-          }));
-
-          // Затем получаем настройки
-          const settingsResponse = await api.getSettings();
-          discount.value = {
-            type: settingsResponse.data.discount_type,
-            value: settingsResponse.data.discount_value
-          };
-
-          selectedFuel.value = fuels.value[0];
-          currentScreen.value = 'fuel';
+        if (azsResponse.data && azsResponse.data.fuel && azsResponse.data.fuel.length > 0) {
+          fuels.value = azsResponse.data.fuel
+          selectedFuel.value = fuels.value[0]
+          currentScreen.value = 'fuel'
         } else {
-          alert('АЗС с таким номером не найдена');
+          showNotify('АЗС с таким номером не найдена', 'error')
         }
       } catch (error) {
-        alert('Ошибка загрузки данных АЗС');
-        console.error('Error loading AZS data:', error);
-      } finally {
-        isLoading.value = false;
+        console.error('Error loading AZS data:', error)
+        showNotify('Ошибка загрузки данных АЗС', 'error')
       }
-    };
-    
+    }
+
     const calculateTotal = () => {
-      console.log('Selected fuel:', selectedFuel.value)
-      console.log('Amount:', amount.value)
-      console.log('Total:', total.value)
       if (!selectedFuel.value || !amount.value) {
         total.value = 0
         return
       }
 
-      // Используем discount_price если доступен, иначе price
-      const finalPrice = selectedFuel.value.discount_price !== null && selectedFuel.value.discount_price !== undefined
-        ? selectedFuel.value.discount_price
-        : selectedFuel.value.price
+      const price = selectedFuel.value.discount_price || selectedFuel.value.price
 
       if (isVolume.value) {
-        total.value = (finalPrice * amount.value).toFixed(2)
+        total.value = (price * parseFloat(amount.value)).toFixed(2)
       } else {
         // Если оплата по сумме, вычисляем объем
-        total.value = amount.value
+        const volume = parseFloat(amount.value) / price
+        total.value = parseFloat(amount.value).toFixed(2)
       }
     }
 
     const goToPayment = () => {
       if (!selectedFuel.value || !columnNumber.value || !amount.value) {
-        alert('Заполните все поля')
+        showNotify('Заполните все поля', 'error')
         return
       }
 
-      // Передаем правильные данные
-      const finalPrice = selectedFuel.value.discount_price !== null && selectedFuel.value.discount_price !== undefined
-        ? selectedFuel.value.discount_price
-        : selectedFuel.value.price
-
-      console.log('Final price:', finalPrice) // Для отладки
-      loadPaymentInstructions()
       currentScreen.value = 'payment'
     }
 
     const loadPaymentInstructions = async () => {
       try {
-        const response = await api.getSettings();
-        paymentInstructions.value = response.data.payment_instructions;
+        const response = await api.getSettings()
+        paymentInstructions.value = response.data.payment_instructions
       } catch (error) {
-        paymentInstructions.value = 'Не удалось загрузить инструкцию. Попробуйте позже.';
+        console.error('Error loading payment instructions:', error)
+        paymentInstructions.value = 'Оплатите заказ по реквизитам:\n- Номер карты: 0000 0000 0000 0000\n- Телефон: +7 000 000-00-00'
       }
-    };
+    }
 
     const handleReceiptUpload = (event) => {
       const file = event.target.files[0]
-      if (file && file.type.startsWith('image/')) {
+      if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
         receiptImage.value = file
+
+        // Создаем превью для изображений
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            receiptPreview.value = e.target.result
+          }
+          reader.readAsDataURL(file)
+        } else {
+          // Для PDF показываем иконку
+          receiptPreview.value = '/pdf-icon.png' // Добавьте иконку PDF в папку public
+        }
       } else {
-        alert('Пожалуйста, выберите изображение')
+        showNotify('Пожалуйста, выберите изображение или PDF-файл', 'error')
       }
     }
 
     const checkOrderStatus = async () => {
-      const checkStatus = async () => {
-        try {
-          const response = await api.getOrderStatus(orderId.value);
-          const status = response.data.status;
+      if (!orderId.value) return
 
-          if (status !== 'ожидание') {
-            orderStatus.value = status === 'принято' ? 'approved' : 'rejected';
-            rejectionReason.value = response.data.rejection_reason;
-            currentScreen.value = 'result';
-          } else {
-            // Если статус еще "ожидание", проверяем снова через 5 секунд
-            setTimeout(checkStatus, 5000);
-          }
-        } catch (error) {
-          console.error('Ошибка проверки статуса:', error);
-          setTimeout(checkStatus, 5000);
+      try {
+        const response = await api.getOrderStatus(orderId.value)
+        const status = response.data.status
+
+        if (status !== 'ожидание') {
+          orderStatus.value = status
+          rejectionReason.value = response.data.rejection_reason
+          currentScreen.value = 'result'
+        } else {
+          // Если статус еще "ожидание", проверяем снова через 5 секунд
+          setTimeout(checkOrderStatus, 5000)
         }
-      };
-
-      checkStatus();
-    };
-
+      } catch (error) {
+        console.error('Ошибка проверки статуса:', error)
+        setTimeout(checkOrderStatus, 5000)
+      }
+    }
 
     const submitPayment = async () => {
       try {
-        const formData = {
-          user_id: window.Telegram.WebApp.initDataUnsafe.user?.id || 1, // ID из Telegram
-          azs_number: parseInt(stationNumber.value),
-          column_number: parseInt(columnNumber.value),
-          fuel_type: selectedFuel.value.name,
-          volume: isVolume.value ? parseFloat(amount.value) : null,
-          amount: isVolume.value ? null : parseFloat(amount.value),
-        };
+        // Проверяем обязательные поля
+        if (!stationNumber.value || !columnNumber.value || !selectedFuel.value || !amount.value) {
+          showNotify('Заполните все обязательные поля', 'error');
+          return;
+        }
 
+        // Получаем данные пользователя из Telegram
+        const userData = tgApp.value ? tgApp.value.initDataUnsafe.user : null;
+        const userId = userData ? userData.id : Math.floor(Math.random() * 1000000);
+
+        const formData = new FormData();
+        formData.append('user_id', userId);
+        formData.append('azs_number', parseInt(stationNumber.value));
+        formData.append('column_number', parseInt(columnNumber.value));
+        formData.append('fuel_type', selectedFuel.value.name);
+
+        // Добавляем объем или сумму
+        const numericValue = parseFloat(amount.value);
+        if (isVolume.value) {
+          formData.append('volume', numericValue);
+        } else {
+          formData.append('amount', numericValue);
+        }
+
+        // Добавляем файл если есть
         if (receiptImage.value) {
-          formData.cheque_image = receiptImage.value;
+          formData.append('cheque_image', receiptImage.value);
         }
 
         const response = await api.createOrder(formData);
@@ -288,12 +332,13 @@ export default {
         currentScreen.value = 'waiting';
 
         // Запускаем опрос статуса заказа
-        checkOrderStatus();
+        setTimeout(checkOrderStatus, 5000);
       } catch (error) {
-        alert('Ошибка отправки чека');
+        console.error('Ошибка отправки чека:', error);
+        showNotify('Ошибка отправки чека: ' + (error.response?.data?.detail || error.message), 'error');
       }
-    };
-
+    }
+    
     const resetApp = () => {
       currentScreen.value = 'station'
       stationNumber.value = ''
@@ -301,10 +346,16 @@ export default {
       selectedFuel.value = null
       columnNumber.value = ''
       amount.value = ''
+      total.value = 0
       receiptImage.value = null
+      receiptPreview.value = null
+      orderStatus.value = ''
+      rejectionReason.value = ''
+      orderId.value = null
     }
 
     return {
+      tgApp,
       theme,
       currentScreen,
       stationNumber,
@@ -315,9 +366,15 @@ export default {
       amount,
       total,
       paymentInstructions,
+      formattedInstructions,
       receiptImage,
+      receiptPreview,
       orderStatus,
       rejectionReason,
+      orderId,
+      showNotification,
+      notificationMessage,
+      notificationType,
       validateStation,
       calculateTotal,
       goToPayment,
@@ -330,6 +387,15 @@ export default {
 </script>
 
 <style scoped>
+/* Стили для всех экранов */
+.card {
+  background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
 .input-group {
   margin-bottom: 16px;
 }
@@ -338,15 +404,17 @@ export default {
   display: block;
   margin-bottom: 8px;
   font-weight: 500;
+  color: var(--tg-theme-text-color, #222222);
 }
 
 .input-field {
   width: 100%;
   padding: 12px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--tg-theme-hint-color, #aaaaaa);
   border-radius: 8px;
-  background-color: var(--card-bg);
-  color: var(--text-color);
+  background-color: var(--tg-theme-bg-color, #ffffff);
+  color: var(--tg-theme-text-color, #222222);
+  font-size: 16px;
 }
 
 .toggle-group {
@@ -357,37 +425,75 @@ export default {
 .toggle-btn {
   flex: 1;
   padding: 10px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--tg-theme-hint-color, #aaaaaa);
   border-radius: 8px;
-  background: var(--secondary-color);
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  color: var(--tg-theme-text-color, #222222);
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .toggle-btn.active {
-  background-color: var(--primary-color);
-  color: white;
+  background-color: var(--tg-theme-button-color, #40a7e3);
+  color: var(--tg-theme-button-text-color, #ffffff);
+}
+
+.btn {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+.btn.primary {
+  background-color: var(--tg-theme-button-color, #40a7e3);
+  color: var(--tg-theme-button-text-color, #ffffff);
+}
+
+.btn.secondary {
+  background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  color: var(--tg-theme-text-color, #222222);
+  border: 1px solid var(--tg-theme-hint-color, #aaaaaa);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .total {
   margin: 20px 0;
   padding: 16px;
-  background-color: var(--secondary-color);
+  background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
   border-radius: 8px;
   text-align: center;
 }
 
 .payment-instructions {
   padding: 16px;
-  background-color: var(--secondary-color);
+  background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
   border-radius: 8px;
   margin-bottom: 20px;
+  color: var(--tg-theme-text-color, #222222);
+}
+
+.receipt-preview {
+  max-width: 100%;
+  max-height: 200px;
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tg-theme-hint-color, #aaaaaa);
 }
 
 .loading-spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid var(--border-color);
-  border-top: 4px solid var(--primary-color);
+  border: 4px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
+  border-top: 4px solid var(--tg-theme-button-color, #40a7e3);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin: 20px auto;
@@ -403,16 +509,80 @@ export default {
   }
 }
 
-.success-message {
-  color: green;
-  font-weight: bold;
+.result-content {
   text-align: center;
   margin: 20px 0;
 }
 
+.success-icon,
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.success-icon {
+  color: #27ae60;
+}
+
+.error-icon {
+  color: #e74c3c;
+}
+
+.success-message {
+  color: #27ae60;
+  font-weight: bold;
+}
+
 .error-message {
-  color: red;
+  color: #e74c3c;
+  font-weight: bold;
+}
+
+.rejection-reason {
+  color: var(--tg-theme-text-color, #222222);
+  margin-top: 10px;
+}
+
+.notification {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  border-radius: 8px;
+  z-index: 1000;
+  max-width: 80%;
   text-align: center;
-  margin: 20px 0;
+}
+
+.notification.info {
+  background-color: var(--tg-theme-button-color, #40a7e3);
+  color: var(--tg-theme-button-text-color, #ffffff);
+}
+
+.notification.error {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.notification.success {
+  background-color: #27ae60;
+  color: white;
+}
+
+/* Адаптивность */
+@media (max-width: 480px) {
+  .card {
+    padding: 16px;
+  }
+
+  .btn {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .toggle-group {
+    flex-direction: column;
+  }
 }
 </style>

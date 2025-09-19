@@ -1,7 +1,7 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.ext.asyncio import AsyncAttrs
-import os
 from dotenv import load_dotenv
 
 load_dotenv()

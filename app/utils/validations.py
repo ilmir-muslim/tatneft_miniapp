@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from app import crud, models
+from app import crud
 from app.utils import price_parser
 
 
@@ -15,27 +15,14 @@ def validate_azs_number(azs_number: int):
 def validate_column_number(azs_number: int, column_number: int, db: Session):
     """Проверяет, что номер колонки существует для указанной АЗС"""
     try:
-        # Получаем кэшированные данные АЗС
-        cached_data = (
-            db.query(models.PriceCache)
-            .filter(models.PriceCache.azs_number == azs_number)
-            .first()
-        )
+        # Получаем настройки через crud с передачей сессии
+        settings = crud.get_settings(db)
+        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings)
 
-        if not cached_data:
-            # Если данных нет в кэше, получаем их через API
-            settings = crud.get_settings(db)
-            # Убедитесь, что здесь тоже передается db
-            azs_data = price_parser.get_azs_data_with_discount(azs_number, settings, db)
+        if "error" in azs_data:
+            raise HTTPException(status_code=404, detail=azs_data["error"])
 
-            if "error" in azs_data:
-                raise HTTPException(status_code=404, detail=azs_data["error"])
-
-            num_columns = len(azs_data.get("fuel", []))
-        else:
-            # Используем кэшированные данные
-            azs_data = cached_data.prices_data
-            num_columns = len(azs_data.get("fuel", []))
+        num_columns = len(azs_data.get("fuel", []))
 
         if not (1 <= column_number <= num_columns):
             raise HTTPException(

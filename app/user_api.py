@@ -62,6 +62,7 @@ async def create_order(
             "created_at": order.created_at.isoformat(),
         }
     )
+    print(f"Received: user_id={user_id}, azs_number={azs_number}, column_number={column_number}, fuel_type={fuel_type}, volume={volume}, amount={amount}")
 
     return order
 
@@ -90,8 +91,8 @@ def get_azs_data(azs_number: int, db: Session = Depends(get_db)):
     validate_azs_number(azs_number)
     try:
         settings = crud.get_settings(db)
-        # Передаем db как третий аргумент
-        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings, db)
+        # Убираем передачу db как параметра
+        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings)
 
         if "error" in azs_data:
             print(f"AZS {azs_number} error: {azs_data['error']}")

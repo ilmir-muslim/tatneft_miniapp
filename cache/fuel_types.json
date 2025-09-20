@@ -1,0 +1,60 @@
+{
+  "data": {
+    "34": {
+      "name": "АИ-95",
+      "color": "#dc4c4d",
+      "filter_group": "АИ 95"
+    },
+    "30": {
+      "name": "ДТ",
+      "color": "#131d2f",
+      "filter_group": "ДТ"
+    },
+    "46": {
+      "name": "ДТ ",
+      "color": "#131d2f",
+      "filter_group": "ДТ Танеко"
+    },
+    "36": {
+      "name": "АИ-92",
+      "color": "#00b473",
+      "filter_group": "АИ 92"
+    },
+    "37": {
+      "name": "Газ",
+      "color": "#00aeef",
+      "filter_group": "Газ"
+    },
+    "40": {
+      "name": "АИ-98",
+      "color": "#e3b505",
+      "filter_group": "АИ 98"
+    },
+    "82": {
+      "name": "АИ-100",
+      "color": "#f2ca3c",
+      "filter_group": "АИ 100"
+    },
+    "33": {
+      "name": "Метан",
+      "color": "#00a6d6",
+      "filter_group": "КПГ"
+    },
+    "29": {
+      "name": "АИ-92 ",
+      "color": "#00b473",
+      "filter_group": "АИ 92 Танеко"
+    },
+    "74": {
+      "name": "АИ-95 ",
+      "color": "#00b473",
+      "filter_group": "АИ 95 Танеко"
+    },
+    "35": {
+      "name": "AdBlue",
+      "color": "#989898",
+      "filter_group": "AdBlue"
+    }
+  },
+  "updated_at": "2025-09-19T22:14:32.824166"
+}

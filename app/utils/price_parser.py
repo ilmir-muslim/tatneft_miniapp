@@ -1,7 +1,6 @@
 import requests
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from app import models
+from app.utils.file_cache import file_cache
 
 
 class PriceParser:
@@ -12,11 +11,11 @@ class PriceParser:
         self.azs_list_cache = None
         self.cache_expiration = None
 
-    def get_azs_list(self, db: Session, use_cache_on_error: bool = True):
+    def get_azs_list(self, use_cache_on_error: bool = True):
         """Получает и кэширует список всех АЗС с fallback на кэш при ошибках"""
         current_time = datetime.now()
 
-        # Проверяем, актуален ли кэш в памяти
+        # Проверяем актуальность кэша в памяти
         if (
             self.azs_list_cache is not None
             and self.cache_expiration is not None
@@ -24,23 +23,15 @@ class PriceParser:
         ):
             return self.azs_list_cache
 
+        # Проверяем файловый кэш
+        cached_data = file_cache.get("azs_list")
+        if cached_data:
+            self.azs_list_cache = cached_data
+            self.cache_expiration = datetime.now() + self.cache_timeout
+            return self.azs_list_cache
+
         try:
-            # Проверяем кэш в базе данных
-            cached_data = (
-                db.query(models.PriceCache)
-                .filter(models.PriceCache.azs_number == 0)
-                .first()
-            )
-
-            if (
-                cached_data
-                and cached_data.updated_at >= current_time - self.cache_timeout
-            ):
-                self.azs_list_cache = cached_data.prices_data
-                self.cache_expiration = cached_data.updated_at + self.cache_timeout
-                return self.azs_list_cache
-
-            # Если кэш устарел или отсутствует, делаем запрос к API
+            # Запрос к API
             response = requests.get(f"{self.base_url}/", timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -48,58 +39,27 @@ class PriceParser:
             if data.get("status") == "success":
                 self.azs_list_cache = data.get("data", [])
                 self.cache_expiration = current_time + self.cache_timeout
-
-                # Сохраняем в базу данных
-                if cached_data:
-                    cached_data.prices_data = self.azs_list_cache
-                    cached_data.updated_at = current_time
-                else:
-                    cached_data = models.PriceCache(
-                        azs_number=0,
-                        prices_data=self.azs_list_cache,
-                        updated_at=current_time,
-                    )
-                    db.add(cached_data)
-
-                db.commit()
+                file_cache.set("azs_list", self.azs_list_cache)
                 return self.azs_list_cache
             else:
-                # Если API вернуло ошибку, используем кэш если разрешено
-                if use_cache_on_error and cached_data:
-                    self.azs_list_cache = cached_data.prices_data
-                    return self.azs_list_cache
                 return []
         except Exception as e:
             print(f"Ошибка при получении списка АЗС: {e}")
-            # При ошибке сети используем кэшированные данные если они есть
-            if use_cache_on_error and cached_data:
-                self.azs_list_cache = cached_data.prices_data
-                return self.azs_list_cache
             return []
 
-    def get_fuel_types(self, db: Session, use_cache_on_error: bool = True):
+    def get_fuel_types(self, use_cache_on_error: bool = True):
         """Получает и кэширует справочник типов топлива с fallback на кэш"""
         if self.fuel_types_cache is not None:
             return self.fuel_types_cache
 
+        # Проверяем файловый кэш
+        cached_data = file_cache.get("fuel_types")
+        if cached_data:
+            self.fuel_types_cache = cached_data
+            return self.fuel_types_cache
+
         try:
-            # Проверяем кэш в базе данных
-            cached_data = (
-                db.query(models.PriceCache)
-                .filter(models.PriceCache.azs_number == -1)
-                .first()
-            )
-
-            current_time = datetime.now()
-
-            if (
-                cached_data
-                and cached_data.updated_at >= current_time - self.cache_timeout
-            ):
-                self.fuel_types_cache = cached_data.prices_data
-                return self.fuel_types_cache
-
-            # Если кэш устарел или отсутствует, делаем запрос к API
+            # Запрос к API
             response = requests.get(f"{self.base_url}/fuel_types/", timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -113,54 +73,27 @@ class PriceParser:
                     }
                     for item in data.get("data", {}).get("items", [])
                 }
-
-                # Сохраняем в базу данных
-                if cached_data:
-                    cached_data.prices_data = self.fuel_types_cache
-                    cached_data.updated_at = current_time
-                else:
-                    cached_data = models.PriceCache(
-                        azs_number=-1,
-                        prices_data=self.fuel_types_cache,
-                        updated_at=current_time,
-                    )
-                    db.add(cached_data)
-
-                db.commit()
+                file_cache.set("fuel_types", self.fuel_types_cache)
                 return self.fuel_types_cache
             else:
-                # Если API вернуло ошибку, используем кэш если разрешено
-                if use_cache_on_error and cached_data:
-                    self.fuel_types_cache = cached_data.prices_data
-                    return self.fuel_types_cache
                 return {}
         except Exception as e:
             print(f"Ошибка при получении справочника топлива: {e}")
-            # При ошибке сети используем кэшированные данные если они есть
-            if use_cache_on_error and cached_data:
-                self.fuel_types_cache = cached_data.prices_data
-                return self.fuel_types_cache
             return {}
 
-    def get_azs_data_with_discount(self, azs_number: int, settings, db: Session):
+    def get_azs_data_with_discount(self, azs_number: int, settings):
         """Получает данные АЗС с применением скидки с fallback на кэш при ошибках"""
-        # Проверяем кэш в базе данных
-        cached_data = (
-            db.query(models.PriceCache)
-            .filter(models.PriceCache.azs_number == azs_number)
-            .first()
-        )
-
-        current_time = datetime.now()
+        # Проверяем файловый кэш
+        cached_data = file_cache.get(f"azs_{azs_number}")
         use_cached_data = False
 
         # Если есть актуальный кэш, используем его
-        if cached_data and cached_data.updated_at >= current_time - self.cache_timeout:
-            azs_data = cached_data.prices_data
+        if cached_data:
+            azs_data = cached_data
         else:
             try:
-                # Получаем список АЗС с возможностью использования кэша при ошибках
-                azs_list = self.get_azs_list(db, use_cache_on_error=True)
+                # Получаем список АЗС
+                azs_list = self.get_azs_list(use_cache_on_error=True)
                 if not azs_list:
                     return {"error": "Не удалось загрузить список АЗС"}
 
@@ -183,33 +116,22 @@ class PriceParser:
                 }
 
                 # Сохраняем в кэш
-                if cached_data:
-                    cached_data.prices_data = azs_data
-                    cached_data.updated_at = current_time
-                else:
-                    cached_data = models.PriceCache(
-                        azs_number=azs_number,
-                        prices_data=azs_data,
-                        updated_at=current_time,
-                    )
-                    db.add(cached_data)
-
-                db.commit()
+                file_cache.set(f"azs_{azs_number}", azs_data)
 
             except Exception as e:
                 print(f"Ошибка при обновлении данных АЗС {azs_number}: {e}")
                 # Если при обновлении произошла ошибка, используем кэшированные данные
                 if cached_data:
                     print(f"Используются кэшированные данные для АЗС {azs_number}")
-                    azs_data = cached_data.prices_data
+                    azs_data = cached_data
                     use_cached_data = True
                 else:
                     return {
                         "error": f"Не удалось загрузить данные для АЗС {azs_number}"
                     }
 
-        # Получаем справочник топлива с возможностью использования кэша при ошибках
-        fuel_types = self.get_fuel_types(db, use_cache_on_error=True)
+        # Получаем справочник топлива
+        fuel_types = self.get_fuel_types(use_cache_on_error=True)
 
         # Обрабатываем данные о топливе
         fuel_data = []
@@ -221,7 +143,7 @@ class PriceParser:
             # Используем оригинальную цену если нет скидки
             final_price = discount_price if discount_price is not None else price
 
-            # Применяем скидку из настроек только если цена существует
+            # Применяем скидку из настроек
             discounted_price = final_price
             if final_price is not None and settings:
                 if settings.discount_type == "percent":
@@ -252,6 +174,5 @@ class PriceParser:
             "fuel": fuel_data,
             "actualization_date": azs_data.get("actualization_date"),
         }
-
 
         return result

@@ -298,31 +298,18 @@ export default {
 
     const submitPayment = async () => {
       try {
-        // Проверяем обязательные поля
-        if (!stationNumber.value || !columnNumber.value || !selectedFuel.value || !amount.value) {
-          showNotify('Заполните все обязательные поля', 'error');
-          return;
-        }
-
-        // Получаем данные пользователя из Telegram
-        const userData = tgApp.value ? tgApp.value.initDataUnsafe.user : null;
-        const userId = userData ? userData.id : Math.floor(Math.random() * 1000000);
-
         const formData = new FormData();
         formData.append('user_id', userId);
         formData.append('azs_number', parseInt(stationNumber.value));
         formData.append('column_number', parseInt(columnNumber.value));
         formData.append('fuel_type', selectedFuel.value.name);
 
-        // Добавляем объем или сумму
-        const numericValue = parseFloat(amount.value);
         if (isVolume.value) {
-          formData.append('volume', numericValue);
+          formData.append('volume', parseFloat(amount.value));
         } else {
-          formData.append('amount', numericValue);
+          formData.append('amount', parseFloat(amount.value));
         }
 
-        // Добавляем файл если есть
         if (receiptImage.value) {
           formData.append('cheque_image', receiptImage.value);
         }
@@ -330,15 +317,13 @@ export default {
         const response = await api.createOrder(formData);
         orderId.value = response.data.id;
         currentScreen.value = 'waiting';
-
-        // Запускаем опрос статуса заказа
         setTimeout(checkOrderStatus, 5000);
       } catch (error) {
         console.error('Ошибка отправки чека:', error);
-        showNotify('Ошибка отправки чека: ' + (error.response?.data?.detail || error.message), 'error');
+        showNotify('Ошибка отправки чека', 'error');
       }
     }
-    
+        
     const resetApp = () => {
       currentScreen.value = 'station'
       stationNumber.value = ''

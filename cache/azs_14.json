@@ -1,0 +1,53 @@
+{
+  "data": {
+    "azs_number": 14,
+    "address": "Республика Татарстан, г.Казань, Ямашева проспект, 105а/1",
+    "region": "Казань,  районы прилегающие к городу",
+    "fuel": [
+      {
+        "fuel_type_id": 29,
+        "price": 55.74,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      },
+      {
+        "fuel_type_id": 46,
+        "price": 68.06,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      },
+      {
+        "fuel_type_id": 34,
+        "price": 59.14,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      },
+      {
+        "fuel_type_id": 82,
+        "price": 83.3,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      },
+      {
+        "fuel_type_id": 37,
+        "price": 26.4,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      },
+      {
+        "fuel_type_id": 36,
+        "price": 54.74,
+        "discount_price": null,
+        "updated": 1758308870.06515,
+        "currency_code": "rub"
+      }
+    ],
+    "actualization_date": 1758308702
+  },
+  "updated_at": "2025-09-19T22:14:32.445244"
+}

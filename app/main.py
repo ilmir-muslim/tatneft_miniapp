@@ -14,10 +14,15 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://your-telegram-domain.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 app.include_router(user_router)
@@ -33,4 +38,17 @@ async def root():
 
 @app.websocket("/admin/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # Добавьте проверку origin
+    origin = websocket.headers.get("origin")
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://your-telegram-domain.com",
+    ]
+
+    if origin not in allowed_origins:
+        await websocket.close(code=403)
+        return
+
+    await websocket.accept()
     await handle_websocket(websocket)

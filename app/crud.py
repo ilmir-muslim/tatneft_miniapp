@@ -84,12 +84,12 @@ def get_settings(db: Session):
 
 def update_settings(db: Session, settings: schemas.SettingsUpdate):
     db_settings = db.query(models.Setting).first()
+
     if db_settings:
-        for key, value in settings.model_dump().items():
+        for key, value in settings.dict(exclude_unset=True).items():
             setattr(db_settings, key, value)
     else:
-        # Создаем новые настройки если их нет
-        db_settings = models.Setting(**settings.model_dump())
+        db_settings = models.Setting(**settings.dict())
         db.add(db_settings)
 
     db.commit()

@@ -23,6 +23,16 @@ class FileStorage:
             "application/pdf",
         }
 
+        max_size = 5 * 1024 * 1024
+        content = await file.read()
+        if len(content) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail="Размер файла не должен превышать 5MB"
+            )
+        
+        await file.seek(0) 
+
         if file.content_type not in allowed_types:
             raise HTTPException(
                 status_code=400,

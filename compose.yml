@@ -31,9 +31,11 @@ services:
       ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-your-secret-key-here}
     volumes:
       - ./uploads:/app/uploads
+      - tatneft_cache:/app/cache
     depends_on:
       mysql_tatneft:
         condition: service_healthy
+        
     networks:
       - tatneft_network
     restart: unless-stopped
@@ -71,6 +73,7 @@ services:
 
 volumes:
   mysql_tatneft_data:
+  tatneft_cache:
 
 networks:
   tatneft_network:

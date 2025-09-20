@@ -34,12 +34,3 @@ class Setting(Base):
     discount_type = Column(Enum("percent", "fixed"))
     discount_value = Column(Float)
     payment_instructions = Column(Text)
-
-
-class PriceCache(Base):
-    __tablename__ = "price_cache"
-
-    id = Column(Integer, primary_key=True)
-    azs_number = Column(Integer, unique=True)
-    prices_data = Column(JSON)  # Хранение цен в формате JSON
-    updated_at = Column(DateTime, default=func.now())

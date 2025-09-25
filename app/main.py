@@ -13,9 +13,10 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://admin.toplivo16.ru",
+        "https://toplivo16.ru",
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://your-telegram-domain.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -33,15 +34,15 @@ async def root():
     return {"message": "Tatneft MiniApp API"}
 
 
-
 @app.websocket("/admin/ws")
 async def websocket_endpoint(websocket: WebSocket):
     # Добавьте проверку origin
     origin = websocket.headers.get("origin")
     allowed_origins = [
+        "https://admin.toplivo16.ru",
+        "https://toplivo16.ru",
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://your-telegram-domain.com",
     ]
 
     if origin not in allowed_origins:
@@ -56,4 +57,3 @@ async def websocket_endpoint(websocket: WebSocket):
 async def payment_result():
     """Страница результата платежа (для redirect URL)"""
     return {"message": "Платеж обработан"}
-

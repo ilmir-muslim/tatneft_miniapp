@@ -7,7 +7,6 @@
 
     <main class="main">
       <!-- Экран 1: Ввод номера АЗС -->
-      <!-- Экран 1: Ввод номера АЗС -->
       <div v-if="currentScreen === 'station'" class="card">
         <h2>Введите номер АЗС</h2>
         <div class="input-group">

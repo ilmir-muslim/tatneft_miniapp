@@ -44,6 +44,42 @@ class FileCache:
         except Exception as e:
             logger.error(f"Error writing cache file {file_path}: {e}")
 
+    def delete(self, key: str):
+        """Удаляет данные по ключу"""
+        file_path = self._get_file_path(key)
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting cache file {file_path}: {e}")
+            return False
+
+
+    def get_last_updated(self, key: str) -> Optional[datetime]:
+        """Получает время последнего обновления кэша"""
+        file_path = self._get_file_path(key)
+        if not file_path.exists():
+            return None
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return datetime.fromisoformat(data["updated_at"])
+        except Exception as e:
+            logger.error(f"Error reading cache file {file_path}: {e}")
+            return None
+
+
+    def is_cache_expired(self, key: str, hours: int = 12) -> bool:
+        """Проверяет, устарел ли кэш (старше указанного количества часов)"""
+        last_updated = self.get_last_updated(key)
+        if not last_updated:
+            return True
+
+        return datetime.now() - last_updated > timedelta(hours=hours)
+
 
 # Глобальный экземпляр кэша
 file_cache = FileCache()

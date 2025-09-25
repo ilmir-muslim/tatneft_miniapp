@@ -1,9 +1,11 @@
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.utils.notifications import notify_new_order
-from app.utils.validations import validate_azs_number, validate_column_number
+from app.utils.validations import validate_azs_number
+from app.utils.alfa_payment import AlfaPayment
+from .utils.alfa_payment_emulator import alfa_emulator
 
 from .dependencies import get_db
 from . import crud, schemas
@@ -11,60 +13,110 @@ from .utils.price_parser import PriceParser
 
 router = APIRouter()
 price_parser = PriceParser()
+alfa_payment = AlfaPayment()
 
 
 @router.post("/orders/", response_model=schemas.Order)
 async def create_order(
-    user_id: int = Form(...),
-    azs_number: int = Form(...),
-    column_number: int = Form(...),
-    fuel_type: str = Form(...),
-    volume: float = Form(None),  
-    amount: float = Form(None),  
-    cheque_image: Optional[UploadFile] = File(None),
+    order_data: schemas.OrderCreate,
     db: Session = Depends(get_db),
 ):
-    # Проверяем что указан либо объем, либо сумма
-    if volume is None and amount is None:
-        raise HTTPException(
-            status_code=422, detail="Необходимо указать объем или сумму"
+    """Создание заказа через JSON"""
+    order_dict = order_data.model_dump()
+    if "status" in order_dict and isinstance(order_dict["status"], schemas.OrderStatus):
+        order_dict["status"] = order_dict["status"].value
+    print(f"Received order data: {order_dict}")
+
+    try:
+        # Проверка объема и суммы
+        if order_data.volume is None and order_data.amount is None:
+            raise HTTPException(
+                status_code=422, detail="Необходимо указать объем или сумму"
+            )
+        if order_data.volume is not None and order_data.amount is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="Укажите только объем ИЛИ сумму, не оба параметра",
+            )
+
+        # Валидация номера АЗС
+        validate_azs_number(order_data.azs_number)
+
+        # Создаем заказ
+        order = await crud.create_order(db=db, order=order_data)
+
+        # Отправляем уведомление о новом заказе
+        await notify_new_order(
+            {
+                "id": order.id,
+                "user_id": order.user_id,
+                "azs_number": order.azs_number,
+                "column_number": order.column_number,
+                "fuel_type": order.fuel_type,
+                "volume": order.volume,
+                "amount": order.amount,
+                "status": order.status.value,
+                "created_at": order.created_at.isoformat(),
+            }
         )
 
-    # Валидация номера АЗС
-    validate_azs_number(azs_number)
+        print(f"Order created successfully: ID={order.id}")
+        try:
+            # Очищаем кэш для конкретной АЗС
+            azs_id = getattr(order_data, "azs_id", None)
+            price_parser.clear_azs_cache(order_data.azs_number, azs_id)
+            print(f"Кэш очищен для АЗС {order_data.azs_number} (ID: {azs_id or 'не указан'})")
+        except Exception as e:
+            print(f"Ошибка при очистке кэша: {e}")
+        return order
 
-    # Валидация номера колонки для данной АЗС (использует кэш)
-    validate_column_number(azs_number, column_number, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error creating order: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    order_data = schemas.OrderCreate(
-        azs_number=azs_number,
-        column_number=column_number,
-        fuel_type=fuel_type,
-        volume=volume,
-        amount=amount,
+
+@router.post("/orders/{order_id}/payment", response_model=schemas.PaymentResponse)
+async def create_payment(
+    order_id: int,
+    payment_request: schemas.PaymentRequest,
+    db: Session = Depends(get_db),
+):
+    """Создание платежа через JSON"""
+    # Получаем заказ
+    order = crud.get_order(db, order_id=order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Создаем платеж в Альфа-Банке
+    payment_data = await alfa_payment.create_payment(
+        db, order, payment_request.return_url
     )
 
-    order = await crud.create_order(
-        db=db, order=order_data, user_id=user_id, cheque_image=cheque_image
+    if not payment_data or "formUrl" not in payment_data:
+        raise HTTPException(status_code=500, detail="Failed to create payment")
+
+    # Обновляем информацию о платеже в заказе
+    crud.update_order_payment_status(
+        db,
+        order_id,
+        payment_status="pending",
+        payment_id=payment_data.get("orderId"),
+        payment_data=payment_data,
     )
 
-    # Отправляем уведомление о новом заказе
-    await notify_new_order(
-        {
-            "id": order.id,
-            "user_id": order.user_id,
-            "azs_number": order.azs_number,
-            "column_number": order.column_number,
-            "fuel_type": order.fuel_type,
-            "volume": order.volume,
-            "amount": order.amount,
-            "status": order.status,
-            "created_at": order.created_at.isoformat(),
-        }
-    )
-    print(f"Received: user_id={user_id}, azs_number={azs_number}, column_number={column_number}, fuel_type={fuel_type}, volume={volume}, amount={amount}")
+    return {
+        "payment_url": payment_data["formUrl"],
+        "payment_id": payment_data["orderId"],
+        "order_id": order_id,
+    }
 
-    return order
+
+@router.post("/webhook/alfa")
+async def alfa_webhook(data: dict, db: Session = Depends(get_db)):
+    """Обработка вебхука от Альфа-Банка"""
+    return await alfa_payment.handle_webhook(db, data)
 
 
 @router.get("/orders/", response_model=List[schemas.Order])
@@ -78,7 +130,14 @@ def read_order(order_id: int, db: Session = Depends(get_db)):
     db_order = crud.get_order(db, order_id=order_id)
     if db_order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    return db_order
+
+    payment = alfa_emulator.get_payment_by_order_id(order_id)
+
+    order_dict = db_order.__dict__
+    if payment and payment.get("transaction_id"):
+        order_dict["transaction_id"] = payment["transaction_id"]
+
+    return order_dict
 
 
 @router.get("/settings/", response_model=schemas.Settings)
@@ -87,18 +146,106 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.get("/azs/{azs_number}", response_model=schemas.AzsResponse)
-def get_azs_data(azs_number: int, db: Session = Depends(get_db)):
+async def get_azs_data(azs_number: int, db: Session = Depends(get_db)):
+    """Универсальный метод для получения данных АЗС без кэширования списка"""
     validate_azs_number(azs_number)
     try:
         settings = crud.get_settings(db)
-        # Убираем передачу db как параметра
-        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings)
 
+        # Получаем список всех АЗС с данным номером
+        azs_list = price_parser.get_azs_list(use_cache_on_error=True)
+        if not azs_list:
+            raise HTTPException(
+                status_code=404, detail="Не удалось загрузить список АЗС"
+            )
+
+        matching_azs = [azs for azs in azs_list if azs.get("number") == azs_number]
+
+        if not matching_azs:
+            raise HTTPException(
+                status_code=404, detail=f"АЗС с номером {azs_number} не найдена"
+            )
+
+        # Если найдена только одна АЗС - возвращаем ее данные (но НЕ кэшируем на этом этапе)
+        if len(matching_azs) == 1:
+            azs = matching_azs[0]
+            azs_id = azs.get("id")
+
+            # Получаем данные БЕЗ кэширования, передавая azs_id=None
+            azs_data = price_parser.get_azs_data_with_discount(
+                azs_number, settings, azs_id=None  # Не кэшируем при показе списка
+            )
+
+            if "error" in azs_data:
+                raise HTTPException(status_code=404, detail=azs_data["error"])
+
+            # Устанавливаем правильный ID
+            azs_data["id"] = azs_id
+            return azs_data
+
+        # Если несколько АЗС - возвращаем список для выбора (без данных о топливе)
+        selection_list = []
+        for azs in matching_azs:
+            selection_list.append(
+                {
+                    "id": azs.get("id"),
+                    "number": azs.get("number"),
+                    "address": azs.get("address"),
+                    "region": azs.get("region"),
+                    # Не загружаем данные о топливе для списка выбора
+                }
+            )
+
+        return {
+            "need_selection": True,
+            "azs_list": selection_list,
+            "azs_number": azs_number,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error in get_azs_data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/azs/{azs_number}/{azs_id}", response_model=schemas.AzsBaseResponse)
+async def get_specific_azs(azs_number: int, azs_id: int, db: Session = Depends(get_db)):
+    """Получение данных конкретной АЗС по ID"""
+    try:
+        validate_azs_number(azs_number)
+        settings = crud.get_settings(db)
+
+        # Получаем данные с применением скидок, передавая azs_id
+        azs_data = price_parser.get_azs_data_with_discount(azs_number, settings, azs_id)
         if "error" in azs_data:
-            print(f"AZS {azs_number} error: {azs_data['error']}")
             raise HTTPException(status_code=404, detail=azs_data["error"])
 
+        # Проверяем, что возвращена правильная АЗС
+        if azs_data.get("id") != azs_id:
+            print(
+                f"ВНИМАНИЕ: Запрошена АЗС ID {azs_id}, но возвращена АЗС ID {azs_data.get('id')}"
+            )
+            # Все равно возвращаем данные, но логируем проблему
+
+        # Убеждаемся, что ID установлен правильно
+        azs_data["id"] = azs_id
+
         return azs_data
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        print(f"Error in get_specific_azs: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/cache/refresh")
+async def refresh_cache(db: Session = Depends(get_db)):
+    """Принудительное обновление кэша данных"""
+    try:
+        price_parser.force_refresh_all_cache()
+        return {"status": "success", "message": "Кэш успешно обновлен"}
+    except Exception as e:
+        print(f"Ошибка при обновлении кэша: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка обновления кэша")

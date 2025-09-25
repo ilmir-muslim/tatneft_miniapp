@@ -1,14 +1,12 @@
-from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+
 
 from .utils.notifications import handle_websocket
 
 from .admin_api import router as admin_router
 from .user_api import router as user_router
-
-Path("uploads").mkdir(exist_ok=True)
+from .emulator_api import router as emulator_router
 
 app = FastAPI()
 
@@ -27,13 +25,13 @@ app.add_middleware(
 
 app.include_router(user_router)
 app.include_router(admin_router, prefix="/admin")
-
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.include_router(emulator_router)
 
 
 @app.get("/")
 async def root():
     return {"message": "Tatneft MiniApp API"}
+
 
 
 @app.websocket("/admin/ws")
@@ -52,3 +50,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
     await handle_websocket(websocket)
+
+
+@app.get("/payment-result")
+async def payment_result():
+    """Страница результата платежа (для redirect URL)"""
+    return {"message": "Платеж обработан"}
+

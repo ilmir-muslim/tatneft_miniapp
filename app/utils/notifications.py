@@ -8,8 +8,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
+    def connect(self, websocket: WebSocket):
         self.active_connections.append(websocket)
         print(f"Новое подключение. Всего подключений: {len(self.active_connections)}")
 
@@ -43,7 +42,7 @@ manager = ConnectionManager()
 
 
 async def handle_websocket(websocket: WebSocket):
-    await manager.connect(websocket)
+    manager.connect(websocket)  # Теперь это синхронный вызов
     try:
         while True:
             # Ожидаем сообщения от клиента (можем использовать для heartbeat)
@@ -69,10 +68,17 @@ async def notify_new_order(order_data):
 
 async def notify_order_update(order_id, status, reason=None):
     """Уведомление об изменении статуса заказа"""
+    # Преобразуем статус в строку, если это enum
+    status_value = status.value if hasattr(status, "value") else status
+
     message = json.dumps(
         {
             "type": "order_update",
-            "data": {"order_id": order_id, "status": status, "reason": reason},
+            "data": {
+                "order_id": order_id,
+                "status": status_value, 
+                "reason": reason,
+            },
         }
     )
     await manager.broadcast(message)

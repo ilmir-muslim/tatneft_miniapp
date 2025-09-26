@@ -46,7 +46,7 @@ class AlfaPaymentEmulator:
 
         # Генерируем URL для эмулированного банковского интерфейса
         # Используем абсолютный URL для корректной работы в мини-приложении
-        base_url = "http://localhost:8001"  # Можно вынести в настройки
+        base_url = "http://api.toplivo16.ru"  # Можно вынести в настройки
         payment_url = f"{base_url}/payment-emulator/{payment_id}"
 
         return {"formUrl": payment_url, "orderId": payment_id, "payment_id": payment_id}

@@ -13,5 +13,5 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild'
   },
-  base: process.env.NODE_ENV === 'production' ? '/tatneft_miniapp/' : '/'
+  base: './'
 })

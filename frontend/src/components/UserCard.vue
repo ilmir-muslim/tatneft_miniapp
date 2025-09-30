@@ -1,15 +1,15 @@
 <template>
     <div class="user-card">
-        <h3>User Information</h3>
+        <h3>Информация о пользователе</h3>
         <div class="user-info">
             <div class="avatar" v-if="user.photo_url">
                 <img :src="user.photo_url" alt="User avatar" />
             </div>
             <div class="details">
-                <p><strong>Name:</strong> {{ user.first_name }} {{ user.last_name || '' }}</p>
+                <p><strong>Имя:</strong> {{ user.first_name }} {{ user.last_name || '' }}</p>
                 <p v-if="user.username"><strong>Username:</strong> @{{ user.username }}</p>
-                <p v-if="user.language_code"><strong>Language:</strong> {{ user.language_code }}</p>
-                <p v-if="user.is_premium"><span class="premium-badge">Premium User</span></p>
+                <p v-if="user.language_code"><strong>Язык:</strong> {{ user.language_code }}</p>
+                <p v-if="user.is_premium"><span class="premium-badge">Премиум пользователь</span></p>
             </div>
         </div>
     </div>

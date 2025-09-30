@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Enum, JSON
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, Text, Enum, JSON
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
 from .database import Base
@@ -48,3 +48,28 @@ class Setting(Base):
     alfa_password = Column(String(100))  # Пароль API Альфа-Банка
     alfa_token = Column(String(500))  # Токен API Альфа-Банка
     alfa_token_expires = Column(DateTime)  # Время истечения токена
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    phone = Column(String(20), unique=True, index=True)
+    email = Column(String(100), unique=True, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    first_name = Column(String(50))
+    last_name = Column(String(50))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    token = Column(String(500), unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    last_activity = Column(DateTime, server_default=func.now())

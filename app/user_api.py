@@ -1,10 +1,12 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.utils.notifications import notify_new_order
 from app.utils.validations import validate_azs_number
 from app.utils.alfa_payment import AlfaPayment
+from app.utils.auth import create_access_token, verify_password
 from .utils.alfa_payment_emulator import alfa_emulator
 
 from .dependencies import get_db
@@ -14,18 +16,28 @@ from .utils.price_parser import PriceParser
 router = APIRouter()
 price_parser = PriceParser()
 alfa_payment = AlfaPayment()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 @router.post("/orders/", response_model=schemas.Order)
 async def create_order(
     order_data: schemas.OrderCreate,
+    token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
     """Создание заказа через JSON"""
+    current_user = crud.get_current_user(db, token)
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
+
     order_dict = order_data.model_dump()
     if "status" in order_dict and isinstance(order_dict["status"], schemas.OrderStatus):
         order_dict["status"] = order_dict["status"].value
-    print(f"Received order data: {order_dict}")
+
+    order_dict["user_id"] = current_user.id
+    print(f"Received order data from user {current_user.id}: {order_dict}")
 
     try:
         # Проверка объема и суммы
@@ -43,7 +55,7 @@ async def create_order(
         validate_azs_number(order_data.azs_number)
 
         # Создаем заказ
-        order = await crud.create_order(db=db, order=order_data)
+        order = await crud.create_order(db=db, order=schemas.OrderCreate(**order_dict))
 
         # Отправляем уведомление о новом заказе
         await notify_new_order(
@@ -249,3 +261,74 @@ async def refresh_cache(db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Ошибка при обновлении кэша: {e}")
         raise HTTPException(status_code=500, detail="Ошибка обновления кэша")
+
+
+@router.post("/auth/register", response_model=schemas.User)
+async def register(
+    user_data: schemas.UserCreate,
+    db: Session = Depends(get_db),
+):
+    """Регистрация нового пользователя"""
+    try:
+        user = crud.create_user(db, user_data)
+        return user
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Error creating user: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/auth/login", response_model=schemas.Token)
+async def login(
+    login_data: schemas.UserLogin,
+    db: Session = Depends(get_db),
+):
+    """Авторизация пользователя"""
+    user = crud.authenticate_user(db, login_data.login, login_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
+        )
+
+    # Создаем сессию
+    session = crud.create_user_session(db, user.id)
+
+    # Создаем JWT токен
+    access_token = create_access_token(data={"sub": str(user.id)})
+
+    return {"access_token": access_token, "token_type": "bearer", "user": user}
+
+
+@router.post("/auth/logout")
+async def logout(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Выход из системы"""
+    success = crud.delete_user_session(db, token)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {"message": "Successfully logged out"}
+
+
+@router.get("/auth/me", response_model=schemas.User)
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    """Получение информации о текущем пользователе"""
+    user = crud.get_current_user(db, token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    return user

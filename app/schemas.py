@@ -118,5 +118,58 @@ class AzsSelectionResponse(BaseModel):
     azs_list: Optional[List] = None
     azs_number: Optional[int] = None
 
+# Добавить после существующих схем
+
+
+class UserBase(BaseModel):
+    username: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+
+class UserCreate(UserBase):
+    password: str
+
+
+class UserLogin(BaseModel):
+    login: str  # username, phone или email
+    password: str
+
+
+class User(UserBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: User
+
+
+class SessionBase(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+class SessionCreate(SessionBase):
+    user_id: int
+
+
+class Session(SessionBase):
+    id: int
+    created_at: datetime
+    last_activity: datetime
+
+    class Config:
+        from_attributes = True
+
 
 AzsResponse = Union[AzsSelectionResponse, AzsBaseResponse]

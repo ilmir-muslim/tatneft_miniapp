@@ -44,13 +44,13 @@ class Order(OrderBase):
     cheque_image_url: Optional[str] = None
 
     class Config:
-        from_attributes = True  
+        from_attributes = True
         json_encoders = {
             OrderStatus: lambda v: v.value,
             datetime: lambda v: v.isoformat(),
         }
 
-    def model_dump(self, **kwargs):  
+    def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
         # Преобразуем enum в строку
         if "status" in data and isinstance(data["status"], OrderStatus):
@@ -67,7 +67,7 @@ class SettingsBase(BaseModel):
     payment_instructions: str
     alfa_login: Optional[str] = None
     alfa_password: Optional[str] = None
-    use_payment_emulator: bool = Field(default=True)  
+    use_payment_emulator: bool = Field(default=True)
 
 
 class SettingsUpdate(SettingsBase):
@@ -103,6 +103,12 @@ class AzsBaseResponse(BaseModel):
     actualization_date: Optional[float] = None
 
 
+class AzsWithCoords(AzsBaseResponse):
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    distance: Optional[float] = None
+
+
 class PaymentRequest(BaseModel):
     return_url: str
 
@@ -117,6 +123,7 @@ class AzsSelectionResponse(BaseModel):
     need_selection: bool
     azs_list: Optional[List] = None
     azs_number: Optional[int] = None
+
 
 # Добавить после существующих схем
 

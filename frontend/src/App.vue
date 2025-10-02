@@ -106,31 +106,70 @@
 
       <!-- Основной интерфейс приложения -->
       <div v-else>
-        <!-- Экран 1: Ввод номера АЗС -->
-        <div v-if="currentScreen === 'station'" class="card">
-          <h2>Введите номер АЗС</h2>
-          <div class="input-group">
-            <input v-model="stationNumber" type="number" min="1" max="999" placeholder="Номер АЗС" class="input-field"
-              :disabled="loadingStation">
-            <button class="btn primary" @click="validateStation" :disabled="!stationNumber || loadingStation">
-              <span v-if="loadingStation" class="button-loading">
+        <!-- Экран 1: Определение местоположения -->
+        <div v-if="currentScreen === 'location'" class="card">
+          <h2>Поиск ближайшей АЗС</h2>
+
+          <div v-if="!userLocation" class="location-permission">
+            <p>Для поиска ближайшей АЗС необходимо разрешить доступ к геолокации</p>
+            <p class="location-tip">На мобильных устройствах используйте GPS для точного определения местоположения</p>
+            <button @click="requestLocation" class="btn primary" :disabled="locationLoading">
+              <span v-if="locationLoading" class="button-loading">
                 <span class="mini-spinner"></span>
-                Загрузка...
+                Определение местоположения...
               </span>
-              <span v-else>Далее</span>
+              <span v-else>Разрешить геолокацию</span>
             </button>
+
+            <div v-if="locationError" class="location-error">
+              <p>{{ locationError }}</p>
+              <button @click="retryLocation" class="btn secondary">Попробовать снова</button>
+            </div>
           </div>
 
-          <!-- Индикатор загрузки под кнопкой -->
-          <div v-if="loadingStation" class="loading-indicator">
-            <p>Ищем АЗС №{{ stationNumber }}...</p>
+          <div v-else-if="loadingNearestAzs" class="loading-indicator">
+            <p>Поиск ближайшей АЗС...</p>
             <div class="loading-spinner"></div>
           </div>
         </div>
 
-        <!-- Экран 2: Выбор топлива и ввод данных -->
+        <!-- Экран 2: Подтверждение АЗС -->
+        <div v-if="currentScreen === 'confirm_station'" class="card">
+          <h2>Подтвердите выбранную АЗС</h2>
+
+          <div class="selected-station-info">
+            <h3>АЗС №{{ nearestAzs.azs_number }}</h3>
+            <p class="station-address">{{ nearestAzs.address }}</p>
+            <p class="distance-info">{{ nearestAzs.distance }} км от вас</p>
+          </div>
+
+          <!-- Карта с АЗС -->
+          <div class="map-container">
+            <div id="yandex-map" ref="yandexMap" class="yandex-map"></div>
+            <div class="map-overlay">
+              <p>📍 Ваше местоположение отмечено синей меткой</p>
+            </div>
+          </div>
+
+          <div class="confirmation-buttons">
+            <button @click="confirmStation" class="btn primary">
+              Да, это правильная АЗС
+            </button>
+            <button @click="retryLocation" class="btn secondary">
+              Нет, найти другую АЗС
+            </button>
+          </div>
+        </div>
+
+        <!-- Экран 3: Выбор топлива и ввод данных -->
         <div v-if="currentScreen === 'fuel'" class="card">
           <h2>Выбор топлива</h2>
+
+          <div class="selected-station-info">
+            <h3>АЗС №{{ selectedStation.azs_number }}</h3>
+            <p>{{ selectedStation.address }}</p>
+            <p class="distance-info">{{ selectedStation.distance }} км от вас</p>
+          </div>
 
           <div v-if="fuels.length === 0" class="loading-indicator">
             <p>Загрузка данных о топливе...</p>
@@ -173,66 +212,12 @@
             <h3>Итого к оплате: {{ total }} ₽</h3>
           </div>
 
-          <button class="btn primary" @click="goToPayment">
+          <button class="btn primary" @click="goToPayment" :disabled="!selectedFuel || !columnNumber || !amount">
             Перейти к оплате
           </button>
-          <button class="btn secondary" @click="currentScreen = 'station'">
-            Назад
+          <button class="btn secondary" @click="currentScreen = 'confirm_station'">
+            Назад к выбору АЗС
           </button>
-        </div>
-
-        <!-- Экран 3: Выбор конкретной АЗС -->
-        <div v-if="currentScreen === 'select_station'" class="card">
-          <h2>Выберите АЗС №{{ stationNumber }}</h2>
-
-          <div v-if="!selectedStationForMap" class="station-selection">
-            <p>Найдено несколько АЗС с этим номером:</p>
-
-            <div class="station-list">
-              <div v-for="station in matchingStations" :key="station.id" class="station-item"
-                :class="{ 'selected': selectedStationForMap && selectedStationForMap.id === station.id }"
-                @click="selectStationForMap(station)">
-                <div class="station-info">
-                  <h3>АЗС №{{ station.number }}</h3>
-                  <p class="station-address">{{ formatAddress(station.address) }}</p>
-                  <p class="station-region">{{ station.region }}</p>
-                </div>
-                <div class="station-arrow">→</div>
-              </div>
-            </div>
-
-            <button class="btn secondary" @click="currentScreen = 'station'">
-              Назад к вводу номера
-            </button>
-          </div>
-
-          <!-- Выбранная АЗС с картой -->
-          <transition name="station-expand">
-            <div v-if="selectedStationForMap" class="selected-station-with-map">
-              <div class="selected-station-card">
-                <div class="station-header">
-                  <h3>АЗС №{{ selectedStationForMap.number }}</h3>
-                  <button class="btn secondary small" @click="deselectStation">
-                    ← Выбрать другую
-                  </button>
-                </div>
-                <p class="station-address">{{ selectedStationForMap.address }}</p>
-                <p class="station-region">{{ selectedStationForMap.region }}</p>
-              </div>
-
-              <!-- Яндекс карта -->
-              <div class="map-container">
-                <div id="yandex-map" ref="yandexMap" class="yandex-map"></div>
-                <div class="map-overlay">
-                  <p>📍 {{ selectedStationForMap.address }}</p>
-                </div>
-              </div>
-
-              <button class="btn primary confirm-btn" @click="confirmStationSelection">
-                Подтвердить выбор этой АЗС
-              </button>
-            </div>
-          </transition>
         </div>
 
         <!-- Экран 4: Подтверждение и оплата через Альфа-Банк -->
@@ -241,7 +226,7 @@
 
           <div class="order-summary">
             <h3>Детали заказа:</h3>
-            <p><strong>АЗС:</strong> №{{ stationNumber }}</p>
+            <p><strong>АЗС:</strong> №{{ selectedStation.azs_number }} ({{ selectedStation.address }})</p>
             <p><strong>Колонка:</strong> {{ columnNumber }}</p>
             <p><strong>Топливо:</strong> {{ selectedFuel.name }}</p>
             <p><strong>Сумма:</strong> {{ total }} ₽</p>
@@ -334,8 +319,7 @@ export default {
   setup() {
     // Переменные темы и интерфейса
     const theme = ref('light')
-    const currentScreen = ref('station')
-    const stationNumber = ref('')
+    const currentScreen = ref('location')
     const fuels = ref([])
     const selectedFuel = ref(null)
     const columnNumber = ref('')
@@ -350,13 +334,14 @@ export default {
     const showNotification = ref(false)
     const notificationMessage = ref('')
     const notificationType = ref('info')
-    const matchingStations = ref([])
+    const loadingNearestAzs = ref(false)
+    const locationLoading = ref(false)
+    const locationError = ref('')
+
+    // Переменные геолокации и АЗС
+    const userLocation = ref(null)
+    const nearestAzs = ref(null)
     const selectedStation = ref(null)
-    const loadingStation = ref(false)
-    const selectedStationForMap = ref(null)
-    const yandexMap = ref(null)
-    let map = null
-    let placemark = null
 
     // Переменные авторизации
     const currentUser = ref(null)
@@ -380,6 +365,12 @@ export default {
       return 'Татнефть - Оплата топлива'
     })
 
+    // Яндекс карта
+    const yandexMap = ref(null)
+    let map = null
+    let userPlacemark = null
+    let azsPlacemark = null
+
     // Проверка авторизации при загрузке
     onMounted(() => {
       checkAuth()
@@ -397,6 +388,9 @@ export default {
           currentScreen.value = 'result'
         }
       })
+
+      // Автоматически запрашиваем геолокацию при загрузке
+      requestLocation()
     })
 
     // Методы авторизации
@@ -497,35 +491,94 @@ export default {
       }
     }
 
-    const selectStationForMap = async (station) => {
-      selectedStationForMap.value = station
+    // Методы геолокации
+    const requestLocation = () => {
+      locationLoading.value = true
+      locationError.value = ''
 
-      // Ждем следующего тика DOM для применения анимации
-      await nextTick()
-
-      // Инициализируем карту после анимации
-      setTimeout(() => {
-        initYandexMap(station)
-      }, 500)
-    }
-
-    const deselectStation = () => {
-      // Уничтожаем карту при уходе
-      if (map) {
-        map.destroy()
-        map = null
-        placemark = null
+      if (!navigator.geolocation) {
+        locationError.value = 'Геолокация не поддерживается вашим браузером'
+        locationLoading.value = false
+        return
       }
-      selectedStationForMap.value = null
+
+      // Для мобильных устройств используем высокую точность (GPS)
+      const options = {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 60000
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          userLocation.value = {
+            lat: position.coords.latitude,
+            lon: position.coords.longitude
+          }
+          locationLoading.value = false
+          showNotify('Местоположение определено', 'success')
+          await loadNearestAzs()
+        },
+        (error) => {
+          locationLoading.value = false
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              locationError.value = 'Доступ к геолокации запрещен. Разрешите доступ в настройках браузера или телефона.'
+              break
+            case error.POSITION_UNAVAILABLE:
+              locationError.value = 'Информация о местоположении недоступна. Проверьте, включен ли GPS на вашем устройстве.'
+              break
+            case error.TIMEOUT:
+              locationError.value = 'Время ожидания геолокации истекло. Проверьте подключение к интернету и GPS.'
+              break
+            default:
+              locationError.value = 'Произошла неизвестная ошибка геолокации'
+          }
+          showNotify(locationError.value, 'error')
+        },
+        options
+      )
     }
-    const initYandexMap = (station) => {
-      // Проверяем, загружена ли Яндекс Карта API
+
+    const retryLocation = () => {
+      userLocation.value = null
+      nearestAzs.value = null
+      selectedStation.value = null
+      currentScreen.value = 'location'
+      requestLocation()
+    }
+
+    const loadNearestAzs = async () => {
+      if (!userLocation.value) return
+
+      loadingNearestAzs.value = true
+
+      try {
+        const response = await api.getNearbyAzs(userLocation.value.lat, userLocation.value.lon)
+        nearestAzs.value = response.data
+
+        if (nearestAzs.value) {
+          currentScreen.value = 'confirm_station'
+          await nextTick()
+          await initYandexMap()
+        } else {
+          showNotify('В радиусе 50 км не найдено АЗС', 'error')
+        }
+      } catch (error) {
+        console.error('Error loading nearest AZS:', error)
+        showNotify('Ошибка загрузки данных АЗС', 'error')
+      } finally {
+        loadingNearestAzs.value = false
+      }
+    }
+
+    const initYandexMap = () => {
       if (!window.ymaps) {
         loadYandexMapsAPI().then(() => {
-          createMap(station)
+          createMap()
         })
       } else {
-        createMap(station)
+        createMap()
       }
     }
 
@@ -546,115 +599,95 @@ export default {
       })
     }
 
-    const createMap = (station) => {
-      if (!yandexMap.value) return
+    const createMap = () => {
+      if (!yandexMap.value || !userLocation.value || !nearestAzs.value) return
 
-      // Геокодирование адреса для получения координат
-      window.ymaps.geocode(station.address).then((res) => {
-        const firstGeoObject = res.geoObjects.get(0)
-        if (!firstGeoObject) return
+      // Создаем карту с центром между пользователем и АЗС
+      const userCoords = [userLocation.value.lat, userLocation.value.lon]
+      const azsCoords = [nearestAzs.value.lat, nearestAzs.value.lon]
 
-        const coordinates = firstGeoObject.geometry.getCoordinates()
-
-        // Создаем карту
-        map = new window.ymaps.Map(yandexMap.value, {
-          center: coordinates,
-          zoom: 15,
-          controls: ['zoomControl', 'fullscreenControl']
-        })
-
-        // Добавляем метку
-        placemark = new window.ymaps.Placemark(coordinates, {
-          hintContent: station.address,
-          balloonContent: `
-            <strong>АЗС №${station.number}</strong><br/>
-            ${station.address}<br/>
-            ${station.region || ''}
-          `
-        }, {
-          preset: 'islands#icon',
-          iconColor: '#ff0000'
-        })
-
-        map.geoObjects.add(placemark)
-
-        // Открываем балун с информацией
-        placemark.balloon.open()
-      }).catch((error) => {
-        console.error('Ошибка геокодирования:', error)
-        // Если геокодирование не удалось, создаем карту с центром в регионе
-        createDefaultMap(station)
-      })
-    }
-
-    const createDefaultMap = (station) => {
-      if (!yandexMap.value) return
-
-      // Используем координаты по умолчанию для региона
-      const defaultCoords = getDefaultCoordsForRegion(station.region)
+      // Вычисляем средние координаты для центра карты
+      const centerLat = (userLocation.value.lat + nearestAzs.value.lat) / 2
+      const centerLon = (userLocation.value.lon + nearestAzs.value.lon) / 2
 
       map = new window.ymaps.Map(yandexMap.value, {
-        center: defaultCoords,
-        zoom: 10,
+        center: [centerLat, centerLon],
+        zoom: 14,
         controls: ['zoomControl', 'fullscreenControl']
       })
 
-      // Добавляем метку с текстом вместо точных координат
-      placemark = new window.ymaps.Placemark(defaultCoords, {
-        hintContent: station.address,
-        balloonContent: `
-          <strong>АЗС №${station.number}</strong><br/>
-          ${station.address}<br/>
-          ${station.region || ''}<br/>
-          <em>Точное местоположение требует уточнения</em>
-        `
-      }, {
-        preset: 'islands#dotIcon',
-        iconColor: '#ffaa00'
-      })
-
-      map.geoObjects.add(placemark)
-      placemark.balloon.open()
-    }
-
-    const getDefaultCoordsForRegion = (region) => {
-      // Примерные координаты для основных регионов
-      const regionCoords = {
-        'Москва': [55.7558, 37.6173],
-        'Санкт-Петербург': [59.9343, 30.3351],
-        'Татарстан': [55.7944, 49.1114],
-        'default': [55.7558, 37.6173] // Москва по умолчанию
-      }
-
-      if (!region) return regionCoords.default
-
-      for (const [key, coords] of Object.entries(regionCoords)) {
-        if (region.toLowerCase().includes(key.toLowerCase())) {
-          return coords
+      // Добавляем метку пользователя
+      userPlacemark = new window.ymaps.Placemark(
+        userCoords,
+        {
+          hintContent: 'Ваше местоположение',
+          balloonContent: 'Вы здесь'
+        },
+        {
+          preset: 'islands#blueCircleIcon',
+          iconColor: '#1e88e5'
         }
-      }
+      )
 
-      return regionCoords.default
+      // Добавляем метку АЗС
+      azsPlacemark = new window.ymaps.Placemark(
+        azsCoords,
+        {
+          hintContent: `АЗС №${nearestAzs.value.azs_number}`,
+          balloonContent: `
+            <strong>АЗС №${nearestAzs.value.azs_number}</strong><br/>
+            ${nearestAzs.value.address}<br/>
+            Расстояние: ${nearestAzs.value.distance} км
+          `
+        },
+        {
+          preset: 'islands#redFuelIcon',
+          iconColor: '#ff0000'
+        }
+      )
+
+      map.geoObjects.add(userPlacemark)
+      map.geoObjects.add(azsPlacemark)
+
+      // Добавляем линию между пользователем и АЗС
+      const routeLine = new window.ymaps.Polyline(
+        [userCoords, azsCoords],
+        {},
+        {
+          strokeColor: '#1e88e5',
+          strokeWidth: 4,
+          strokeOpacity: 0.5
+        }
+      )
+
+      map.geoObjects.add(routeLine)
+
+      // Подгоняем карту чтобы показать обе метки
+      map.setBounds(map.geoObjects.getBounds(), {
+        checkZoomRange: true
+      })
     }
 
-    const confirmStationSelection = async () => {
-      if (!selectedStationForMap.value) return
+    const confirmStation = async () => {
+      if (!nearestAzs.value) return
 
       try {
-        loadingStation.value = true
-        await selectSpecificStation(selectedStationForMap.value)
-
-        // Уничтожаем карту после перехода
-        if (map) {
-          map.destroy()
-          map = null
-          placemark = null
+        // Загружаем детальную информацию о топливе для выбранной АЗС
+        const response = await api.getSpecificAzs(nearestAzs.value.azs_number, nearestAzs.value.id)
+        if (response.data && response.data.fuel) {
+          selectedStation.value = {
+            ...nearestAzs.value,
+            fuel: response.data.fuel
+          }
+          fuels.value = response.data.fuel
+          selectedFuel.value = fuels.value[0]
+          currentScreen.value = 'fuel'
+        } else {
+          showNotify('Не удалось загрузить данные по топливу', 'error')
         }
       } catch (error) {
-        console.error('Ошибка подтверждения АЗС:', error)
-        showNotify('Ошибка загрузки данных АЗС', 'error')
-      } finally {
-        loadingStation.value = false
+        console.error('Error loading fuel data:', error)
+        showNotify('Ошибка загрузки данных о топливе', 'error')
       }
     }
 
@@ -669,11 +702,6 @@ export default {
       theme.value = theme.value === 'light' ? 'dark' : 'light'
     }
 
-    const formatAddress = (address) => {
-      if (!address) return 'Адрес не указан'
-      return address.replace(selectedStation.value?.region + ', ', '')
-    }
-
     const showNotify = (message, type = 'info') => {
       notificationMessage.value = message
       notificationType.value = type
@@ -681,95 +709,6 @@ export default {
       setTimeout(() => {
         showNotification.value = false
       }, 3000)
-    }
-
-    const validateStation = async () => {
-      if (!stationNumber.value) {
-        showNotify('Введите номер АЗС', 'error')
-        return
-      }
-
-      loadingStation.value = true
-
-      try {
-        const azsResponse = await api.getFuelPrices(stationNumber.value)
-
-        if (azsResponse.data.need_selection) {
-          matchingStations.value = azsResponse.data.azs_list;
-          currentScreen.value = 'select_station';
-        } else if (azsResponse.data.fuel) {
-          selectedStation.value = {
-            id: azsResponse.data.id || azsResponse.data.azs_number,
-            number: azsResponse.data.azs_number,
-            address: azsResponse.data.address,
-            region: azsResponse.data.region,
-            fuel: azsResponse.data.fuel
-          };
-          fuels.value = azsResponse.data.fuel;
-          selectedFuel.value = fuels.value[0];
-          currentScreen.value = 'fuel';
-        } else {
-          showNotify('АЗС с таким номером не найдена', 'error');
-        }
-      } catch (error) {
-        console.error('Error loading AZS data:', error);
-        try {
-          const cachedResponse = await api.getSpecificAzs(stationNumber.value, stationNumber.value)
-          if (cachedResponse.data && cachedResponse.data.fuel) {
-            selectedStation.value = {
-              id: cachedResponse.data.id,
-              number: cachedResponse.data.azs_number,
-              address: cachedResponse.data.address,
-              region: cachedResponse.data.region,
-              fuel: cachedResponse.data.fuel
-            };
-            fuels.value = cachedResponse.data.fuel;
-            selectedFuel.value = fuels.value[0];
-            currentScreen.value = 'fuel';
-            showNotify('Используются кэшированные данные', 'info');
-          } else {
-            showNotify('АЗС с таким номером не найдена', 'error');
-          }
-        } catch (fallbackError) {
-          showNotify('Ошибка загрузки данных АЗС', 'error');
-        }
-      } finally {
-        loadingStation.value = false
-      }
-    }
-
-    const selectSpecificStation = async (station) => {
-      try {
-        loadingStation.value = true;
-
-        const response = await api.getSpecificAzs(station.number, station.id);
-
-        if (response.data && response.data.fuel) {
-          selectedStation.value = {
-            id: station.id,
-            number: station.number,
-            address: station.address,
-            region: station.region,
-            fuel: response.data.fuel
-          };
-
-          fuels.value = response.data.fuel;
-          selectedFuel.value = fuels.value[0];
-          currentScreen.value = 'fuel';
-
-          console.log('Данные АЗС загружены:', {
-            id: station.id,
-            fuels: fuels.value.length
-          });
-        } else {
-          showNotify('Не удалось загрузить данные по топливу', 'error');
-        }
-      } catch (error) {
-        console.error('Ошибка загрузки данных АЗС:', error);
-        showNotify('Ошибка загрузки данных АЗС', 'error');
-      } finally {
-        loadingStation.value = false;
-      }
     }
 
     const calculateTotal = () => {
@@ -801,10 +740,9 @@ export default {
         const fuelPrice = selectedFuel.value.discount_price || selectedFuel.value.price
 
         const orderData = {
-          user_id: currentUser.value.id, // Используем ID авторизованного пользователя
-          azs_number: parseInt(stationNumber.value),
+          user_id: currentUser.value.id,
+          azs_number: selectedStation.value.azs_number,
           azs_id: selectedStation.value.id,
-          azs_address: selectedStation.value.address,
           column_number: parseInt(columnNumber.value),
           fuel_type: selectedFuel.value.name,
           fuel_price: parseFloat(fuelPrice),
@@ -885,8 +823,7 @@ export default {
     }
 
     const resetApp = () => {
-      currentScreen.value = 'station'
-      stationNumber.value = ''
+      currentScreen.value = 'location'
       fuels.value = []
       selectedFuel.value = null
       columnNumber.value = ''
@@ -897,13 +834,15 @@ export default {
       orderId.value = null
       transactionId.value = null
       paymentUrl.value = ''
+      selectedStation.value = null
+      nearestAzs.value = null
+      userLocation.value = null
     }
 
     return {
       appTitle,
       theme,
       currentScreen,
-      stationNumber,
       fuels,
       selectedFuel,
       columnNumber,
@@ -923,27 +862,27 @@ export default {
       loading,
       loginData,
       userData,
+      userLocation,
+      nearestAzs,
+      selectedStation,
+      loadingNearestAzs,
+      locationLoading,
+      locationError,
+      yandexMap,
       toggleTheme,
-      validateStation,
+      showNotify,
       calculateTotal,
       goToPayment,
       processPayment,
       redirectToBank,
       retryPayment,
       resetApp,
-      matchingStations,
-      selectedStation,
-      formatAddress,
-      selectSpecificStation,
-      loadingStation,
       handleLogin,
       handleRegister,
       handleLogout,
-      selectedStationForMap,
-      yandexMap,
-      selectStationForMap,
-      deselectStation,
-      confirmStationSelection
+      requestLocation,
+      retryLocation,
+      confirmStation
     }
   }
 }
@@ -1195,51 +1134,6 @@ export default {
   margin-top: 10px;
 }
 
-.station-list {
-  margin: 1rem 0;
-}
-
-.station-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.station-item:hover {
-  background-color: var(--secondary-color);
-}
-
-.station-info h3 {
-  margin: 0 0 0.25rem 0;
-  font-size: 1rem;
-}
-
-.station-address {
-  margin: 0 0 0.25rem 0;
-  font-size: 0.9rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
-.station-region {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
-.station-arrow {
-  font-size: 1.2rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
 .header-controls {
   position: absolute;
   top: 20px;
@@ -1279,108 +1173,35 @@ export default {
   text-decoration: underline;
 }
 
-.station-selection {
-  transition: all 0.5s ease;
+/* Стили для экрана геолокации */
+.location-permission {
+  text-align: center;
+  padding: 20px;
 }
 
-.station-list {
-  margin: 1rem 0;
+.location-tip {
+  font-size: 14px;
+  color: #666;
+  margin: 10px 0 20px 0;
+  font-style: italic;
 }
 
-.station-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
-  border: 1px solid var(--border-color);
+.location-error {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #ffebee;
   border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background-color: var(--card-bg);
+  border-left: 4px solid #e74c3c;
 }
 
-.station-item:hover {
-  background-color: var(--secondary-color);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+.location-error p {
+  margin: 0 0 10px 0;
+  color: #c0392b;
 }
 
-.station-item.selected {
-  background-color: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
-}
-
-.station-info h3 {
-  margin: 0 0 0.25rem 0;
-  font-size: 1rem;
-}
-
-.station-address {
-  margin: 0 0 0.25rem 0;
-  font-size: 0.9rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
-.station-region {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
-.station-arrow {
-  font-size: 1.2rem;
-  color: var(--text-color);
-  opacity: 0.7;
-}
-
-/* Анимации для выбора АЗС */
-.station-expand-enter-active,
-.station-expand-leave-active {
-  transition: all 0.5s ease;
-}
-
-.station-expand-enter-from {
-  opacity: 0;
-  transform: translateY(20px);
-}
-
-.station-expand-leave-to {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-
-/* Стили для выбранной АЗС с картой */
-.selected-station-with-map {
-  margin-top: 1rem;
-}
-
-.selected-station-card {
-  background-color: var(--secondary-color);
-  padding: 1.5rem;
-  border-radius: 12px;
-  margin-bottom: 1.5rem;
-  border: 2px solid var(--primary-color);
-}
-
-.station-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.station-header h3 {
-  margin: 0;
-  color: var(--primary-color);
-}
-
-.btn.small {
-  padding: 0.5rem 1rem;
-  font-size: 0.8rem;
+.no-azs-found {
+  text-align: center;
+  padding: 20px;
 }
 
 /* Контейнер для карты */
@@ -1414,12 +1235,43 @@ export default {
   font-weight: 500;
 }
 
-.confirm-btn {
-  width: 100%;
-  margin-top: 1rem;
+/* Информация о выбранной АЗС */
+.selected-station-info {
+  background-color: var(--secondary-color);
   padding: 1rem;
-  font-size: 1.1rem;
-  font-weight: 600;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  border-left: 4px solid var(--primary-color);
+}
+
+.selected-station-info h3 {
+  margin: 0 0 0.5rem 0;
+  color: var(--primary-color);
+}
+
+.station-address {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+.distance-info {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-color);
+  opacity: 0.7;
+}
+
+/* Кнопки подтверждения */
+.confirmation-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 1.5rem;
+}
+
+.confirmation-buttons .btn {
+  margin: 0;
 }
 
 /* Адаптивность */
@@ -1448,19 +1300,22 @@ export default {
     gap: 5px;
   }
 
-  .station-header {
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: flex-start;
-  }
-
   .yandex-map {
     height: 250px;
   }
 
-  .selected-station-card {
-    padding: 1rem;
+  .confirmation-buttons {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  .confirmation-buttons {
+    flex-direction: column;
   }
 
+  .confirmation-buttons .btn {
+    width: 100%;
+  }
 }
 </style>

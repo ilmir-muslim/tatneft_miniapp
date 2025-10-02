@@ -5,8 +5,13 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
-    host: true,
-    port: 3000
+    host: '0.0.0.0', // Разрешаем доступ с любых IP
+    port: 3000,
+    strictPort: true,
+    hmr: {
+      host: 'localhost', // Для горячей перезагрузки
+      protocol: 'ws'
+    }
   },
   build: {
     outDir: 'dist',

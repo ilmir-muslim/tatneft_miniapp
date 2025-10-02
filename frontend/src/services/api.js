@@ -43,8 +43,8 @@ apiClient.interceptors.response.use(
 
 
 export default {
-    getFuelPrices(azsNumber) {
-        return apiClient.get(`/azs/${azsNumber}`);
+    getNearbyAzs(lat, lon) {
+        return apiClient.get(`/azs/nearby?lat=${lat}&lon=${lon}`);
     },
 
     getSpecificAzs(azsNumber, azsId) {
@@ -89,7 +89,7 @@ export default {
             }
         });
     },
-    
+
     getCurrentUser() {
         return apiClient.get('/auth/me');
     }

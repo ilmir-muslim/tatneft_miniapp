@@ -2,6 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from math import radians, sin, cos, sqrt, atan2
 
 from app.utils.notifications import notify_new_order
 from app.utils.validations import validate_azs_number
@@ -77,7 +78,9 @@ async def create_order(
             # Очищаем кэш для конкретной АЗС
             azs_id = getattr(order_data, "azs_id", None)
             price_parser.clear_azs_cache(order_data.azs_number, azs_id)
-            print(f"Кэш очищен для АЗС {order_data.azs_number} (ID: {azs_id or 'не указан'})")
+            print(
+                f"Кэш очищен для АЗС {order_data.azs_number} (ID: {azs_id or 'не указан'})"
+            )
         except Exception as e:
             print(f"Ошибка при очистке кэша: {e}")
         return order
@@ -157,67 +160,53 @@ def get_settings(db: Session = Depends(get_db)):
     return crud.get_settings(db)
 
 
-@router.get("/azs/{azs_number}", response_model=schemas.AzsResponse)
-async def get_azs_data(azs_number: int, db: Session = Depends(get_db)):
-    """Универсальный метод для получения данных АЗС без кэширования списка"""
-    validate_azs_number(azs_number)
+@router.get("/azs/nearby", response_model=schemas.AzsWithCoords)
+async def get_nearest_azs(lat: float, lon: float, db: Session = Depends(get_db)):
+    """Получение ближайшей АЗС по геолокации"""
     try:
         settings = crud.get_settings(db)
 
-        # Получаем список всех АЗС с данным номером
+        # Получаем список всех АЗС с координатами
         azs_list = price_parser.get_azs_list(use_cache_on_error=True)
         if not azs_list:
             raise HTTPException(
                 status_code=404, detail="Не удалось загрузить список АЗС"
             )
 
-        matching_azs = [azs for azs in azs_list if azs.get("number") == azs_number]
+        # Находим ближайшую АЗС
+        nearest_azs = None
+        min_distance = float("inf")
 
-        if not matching_azs:
+        for azs in azs_list:
+            if azs.get("lat") and azs.get("lon"):
+                distance = calculate_distance(lat, lon, azs["lat"], azs["lon"])
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_azs = azs
+
+        if not nearest_azs:
             raise HTTPException(
-                status_code=404, detail=f"АЗС с номером {azs_number} не найдена"
+                status_code=404, detail="В радиусе 50 км не найдено АЗС"
             )
 
-        # Если найдена только одна АЗС - возвращаем ее данные (но НЕ кэшируем на этом этапе)
-        if len(matching_azs) == 1:
-            azs = matching_azs[0]
-            azs_id = azs.get("id")
+        # Получаем данные с применением скидок
+        azs_data = price_parser.get_azs_data_with_discount(
+            nearest_azs["number"], settings, nearest_azs["id"]
+        )
 
-            # Получаем данные БЕЗ кэширования, передавая azs_id=None
-            azs_data = price_parser.get_azs_data_with_discount(
-                azs_number, settings, azs_id=None  # Не кэшируем при показе списка
-            )
+        if "error" in azs_data:
+            raise HTTPException(status_code=404, detail=azs_data["error"])
 
-            if "error" in azs_data:
-                raise HTTPException(status_code=404, detail=azs_data["error"])
+        azs_data["distance"] = round(min_distance, 2)
+        azs_data["lat"] = nearest_azs["lat"]
+        azs_data["lon"] = nearest_azs["lon"]
 
-            # Устанавливаем правильный ID
-            azs_data["id"] = azs_id
-            return azs_data
-
-        # Если несколько АЗС - возвращаем список для выбора (без данных о топливе)
-        selection_list = []
-        for azs in matching_azs:
-            selection_list.append(
-                {
-                    "id": azs.get("id"),
-                    "number": azs.get("number"),
-                    "address": azs.get("address"),
-                    "region": azs.get("region"),
-                    # Не загружаем данные о топливе для списка выбора
-                }
-            )
-
-        return {
-            "need_selection": True,
-            "azs_list": selection_list,
-            "azs_number": azs_number,
-        }
+        return azs_data
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Unexpected error in get_azs_data: {str(e)}")
+        print(f"Unexpected error in get_nearest_azs: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -238,7 +227,6 @@ async def get_specific_azs(azs_number: int, azs_id: int, db: Session = Depends(g
             print(
                 f"ВНИМАНИЕ: Запрошена АЗС ID {azs_id}, но возвращена АЗС ID {azs_data.get('id')}"
             )
-            # Все равно возвращаем данные, но логируем проблему
 
         # Убеждаемся, что ID установлен правильно
         azs_data["id"] = azs_id
@@ -332,3 +320,21 @@ async def get_current_user(
             detail="Invalid authentication credentials",
         )
     return user
+
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Вычисление расстояния между двумя точками в километрах (формула Haversine)"""
+    R = 6371  # Радиус Земли в километрах
+
+    lat1_rad = radians(lat1)
+    lon1_rad = radians(lon1)
+    lat2_rad = radians(lat2)
+    lon2_rad = radians(lon2)
+
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+
+    a = sin(dlat / 2) ** 2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    return R * c

@@ -74,15 +74,14 @@ async def create_order(
         )
 
         print(f"Order created successfully: ID={order.id}")
-        try:
-            # Очищаем кэш для конкретной АЗС
-            azs_id = getattr(order_data, "azs_id", None)
-            price_parser.clear_azs_cache(order_data.azs_number, azs_id)
-            print(
-                f"Кэш очищен для АЗС {order_data.azs_number} (ID: {azs_id or 'не указан'})"
-            )
-        except Exception as e:
-            print(f"Ошибка при очистке кэша: {e}")
+
+        # Очищаем кэш для конкретной АЗС - исправляем получение azs_id
+        azs_id = order_data.azs_id  # Получаем из данных заказа
+        price_parser.clear_azs_cache(order_data.azs_number, azs_id)
+        print(
+            f"Кэш очищен для АЗС {order_data.azs_number} (ID: {azs_id or 'не указан'})"
+        )
+
         return order
 
     except HTTPException:

@@ -125,6 +125,36 @@
               <p>{{ locationError }}</p>
               <button @click="retryLocation" class="btn secondary">Попробовать снова</button>
             </div>
+
+            <!-- Ручной ввод адреса -->
+            <div v-if="showManualInput" class="manual-location-input">
+              <h3>Введите адрес вручную</h3>
+              <div class="input-group">
+                <label>Адрес (город, улица, дом):</label>
+                <input v-model="manualLocationInput" type="text" class="input-field"
+                  placeholder="Например: Казань, Кремлевская 1" @keyup.enter="geocodeAddress(manualLocationInput)">
+              </div>
+              <button @click="geocodeAddress(manualLocationInput)" class="btn primary"
+                :disabled="!manualLocationInput.trim() || locationLoading">
+                <span v-if="locationLoading" class="button-loading">
+                  <span class="mini-spinner"></span>
+                  Поиск...
+                </span>
+                <span v-else>Найти по адресу</span>
+              </button>
+              <button @click="showManualInput = false" class="btn secondary">
+                Назад к автоматическому определению
+              </button>
+
+              <div class="location-examples">
+                <p>Примеры адресов:</p>
+                <ul>
+                  <li><a href="#" @click="manualLocationInput = 'Казань'">Казань</a></li>
+                  <li><a href="#" @click="manualLocationInput = 'Москва'">Москва</a></li>
+                  <li><a href="#" @click="manualLocationInput = 'Санкт-Петербург'">Санкт-Петербург</a></li>
+                </ul>
+              </div>
+            </div>
           </div>
 
           <div v-else-if="loadingNearestAzs" class="loading-indicator">
@@ -141,6 +171,12 @@
             <h3>АЗС №{{ nearestAzs.azs_number }}</h3>
             <p class="station-address">{{ nearestAzs.address }}</p>
             <p class="distance-info">{{ nearestAzs.distance }} км от вас</p>
+            <p v-if="isManualLocation" class="location-source">
+              📍 Местоположение определено по адресу
+            </p>
+            <p v-else class="location-source">
+              📍 Местоположение определено автоматически
+            </p>
           </div>
 
           <!-- Карта с АЗС -->
@@ -361,6 +397,11 @@ export default {
       password: ''
     })
 
+    // Переменные для ручного ввода адреса
+    const manualLocationInput = ref('')
+    const showManualInput = ref(false)
+    const isManualLocation = ref(false)
+
     const appTitle = computed(() => {
       return 'Татнефть - Оплата топлива'
     })
@@ -495,49 +536,103 @@ export default {
     const requestLocation = () => {
       locationLoading.value = true
       locationError.value = ''
+      showManualInput.value = false
 
       if (!navigator.geolocation) {
         locationError.value = 'Геолокация не поддерживается вашим браузером'
         locationLoading.value = false
+        showManualInput.value = true
         return
       }
 
-      // Для мобильных устройств используем высокую точность (GPS)
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
       const options = {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 60000
+        enableHighAccuracy: isMobile,
+        timeout: isMobile ? 15000 : 10000,
+        maximumAge: isMobile ? 60000 : 300000
       }
 
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          const accuracy = position.coords.accuracy
+          console.log(`Location acquired. Accuracy: ${accuracy} meters`)
+
           userLocation.value = {
             lat: position.coords.latitude,
-            lon: position.coords.longitude
+            lon: position.coords.longitude,
+            accuracy: accuracy
           }
           locationLoading.value = false
+          isManualLocation.value = false
           showNotify('Местоположение определено', 'success')
           await loadNearestAzs()
         },
         (error) => {
           locationLoading.value = false
+          let errorMsg = ''
+
           switch (error.code) {
             case error.PERMISSION_DENIED:
-              locationError.value = 'Доступ к геолокации запрещен. Разрешите доступ в настройках браузера или телефона.'
+              errorMsg = 'Доступ к геолокации запрещен. Разрешите доступ в настройках браузера.'
               break
             case error.POSITION_UNAVAILABLE:
-              locationError.value = 'Информация о местоположении недоступна. Проверьте, включен ли GPS на вашем устройстве.'
+              errorMsg = 'Информация о местоположении недоступна.'
+              if (isMobile) {
+                errorMsg += ' Проверьте, включен ли GPS на вашем устройстве.'
+              }
               break
             case error.TIMEOUT:
-              locationError.value = 'Время ожидания геолокации истекло. Проверьте подключение к интернету и GPS.'
+              errorMsg = 'Время ожидания геолокации истекло.'
               break
             default:
-              locationError.value = 'Произошла неизвестная ошибка геолокации'
+              errorMsg = 'Произошла неизвестная ошибка геолокации'
           }
-          showNotify(locationError.value, 'error')
+
+          locationError.value = errorMsg
+          showNotify(errorMsg, 'error')
+          showManualInput.value = true
         },
         options
       )
+    }
+
+    const geocodeAddress = async (address) => {
+      if (!address.trim()) {
+        showNotify('Введите адрес для поиска', 'error')
+        return
+      }
+
+      locationLoading.value = true
+
+      try {
+        // Используем Яндекс Геокодер
+        const response = await fetch(`https://geocode-maps.yandex.ru/1.x/?format=json&apikey=1da45877-c8a9-4ff3-9d61-f927482e3584&geocode=${encodeURIComponent(address)}`)
+        const data = await response.json()
+
+        const found = data.response.GeoObjectCollection.featureMember
+        if (found && found.length > 0) {
+          const pos = found[0].GeoObject.Point.pos.split(' ')
+          userLocation.value = {
+            lon: parseFloat(pos[0]),
+            lat: parseFloat(pos[1]),
+            accuracy: 1000,
+            address: found[0].GeoObject.name
+          }
+
+          isManualLocation.value = true
+          showManualInput.value = false
+          showNotify(`Адрес найден: ${found[0].GeoObject.name}`, 'success')
+          await loadNearestAzs()
+        } else {
+          showNotify('Адрес не найден. Попробуйте другой вариант.', 'error')
+        }
+      } catch (error) {
+        console.error('Geocoding error:', error)
+        showNotify('Ошибка поиска адреса', 'error')
+      } finally {
+        locationLoading.value = false
+      }
     }
 
     const retryLocation = () => {
@@ -545,6 +640,7 @@ export default {
       nearestAzs.value = null
       selectedStation.value = null
       currentScreen.value = 'location'
+      showManualInput.value = false
       requestLocation()
     }
 
@@ -837,6 +933,9 @@ export default {
       selectedStation.value = null
       nearestAzs.value = null
       userLocation.value = null
+      showManualInput.value = false
+      isManualLocation.value = false
+      manualLocationInput.value = ''
     }
 
     return {
@@ -869,6 +968,9 @@ export default {
       locationLoading,
       locationError,
       yandexMap,
+      manualLocationInput,
+      showManualInput,
+      isManualLocation,
       toggleTheme,
       showNotify,
       calculateTotal,
@@ -882,7 +984,8 @@ export default {
       handleLogout,
       requestLocation,
       retryLocation,
-      confirmStation
+      confirmStation,
+      geocodeAddress
     }
   }
 }
@@ -1202,6 +1305,47 @@ export default {
 .no-azs-found {
   text-align: center;
   padding: 20px;
+}
+
+/* Ручной ввод адреса */
+.manual-location-input {
+  margin-top: 20px;
+  padding: 20px;
+  background-color: var(--secondary-color);
+  border-radius: 8px;
+  border-left: 4px solid var(--primary-color);
+}
+
+.location-examples {
+  margin-top: 15px;
+  font-size: 14px;
+}
+
+.location-examples ul {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0 0;
+}
+
+.location-examples li {
+  margin: 5px 0;
+}
+
+.location-examples a {
+  color: var(--primary-color);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.location-examples a:hover {
+  text-decoration: underline;
+}
+
+.location-source {
+  font-size: 12px;
+  color: #666;
+  margin: 5px 0 0 0;
+  font-style: italic;
 }
 
 /* Контейнер для карты */

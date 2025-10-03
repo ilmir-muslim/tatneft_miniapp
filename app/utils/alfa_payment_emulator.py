@@ -14,6 +14,7 @@ class AlfaPaymentEmulator:
     def __init__(self):
         self.payments = {}
         self.success_rate = 0.8  # 80% успешных платежей
+        self.base_url = "https://api.toplivo16.ru"
 
     async def create_payment(
         self, db: Session, order, return_url: str
@@ -144,4 +145,3 @@ class AlfaPaymentEmulator:
 
 # Глобальный экземпляр эмулятора
 alfa_emulator = AlfaPaymentEmulator()
-

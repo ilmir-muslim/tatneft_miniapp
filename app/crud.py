@@ -39,6 +39,9 @@ async def create_order(db: Session, order: schemas.OrderCreate):
         amount=order.amount,
         status=models.OrderStatus.PENDING,
     )
+    # Если есть azs_id, сохраняем его
+    if hasattr(order, "azs_id") and order.azs_id:
+        db_order.azs_id = order.azs_id
 
     db.add(db_order)
     db.commit()
